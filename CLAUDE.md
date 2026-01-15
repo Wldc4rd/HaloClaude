@@ -24,21 +24,14 @@ HaloClaude is a proxy server that allows Halo PSA (a professional services autom
 
 ## Current Architecture
 
-### Phase 1 (Complete) - LiteLLM-based Proxy
+Custom FastAPI proxy deployed on Azure Container Apps:
 
-Currently deployed on Azure Container Apps using LiteLLM with custom callbacks:
-
-- **LiteLLM**: Handles Azure OpenAI ↔ Claude API translation
-- **custom_handler.py**: Fixes message format issues (mounted from Azure Storage)
-- **config.yaml**: LiteLLM configuration
-
-### Phase 2 (In Development) - Custom Proxy with Tool Calling
-
-Replace LiteLLM with a custom FastAPI application that:
-1. Translates Azure OpenAI format to Claude
-2. Injects Halo API tool definitions
-3. Executes tool calls against Halo's API
-4. Loops until Claude provides a final response
+1. Receives Azure OpenAI format requests from Halo PSA
+2. Fixes message format issues (empty content, assistant endings)
+3. Translates to Claude API format
+4. Injects Halo API tool definitions (9 tools for tickets, users, KB, etc.)
+5. Executes agentic tool loop until Claude provides final response
+6. Translates response back to Azure OpenAI format
 
 ## Halo PSA Context
 
@@ -113,10 +106,28 @@ LOG_LEVEL=INFO                    # Logging level
 ## Deployment
 
 Currently deployed on Azure Container Apps:
-- Resource group: `rg-litellm`
-- Container app: `litellm-proxy`
-- Storage account: `litellmconfigsoundit`
-- Config files mounted from Azure Files share
+- Resource group: `rg-haloclaude`
+- Container app: `haloclaude-proxy`
+- Container registry: `haloclauderegistrysoundit`
+- Endpoint: `haloclaude-proxy.ashysky-0dacd66d.westus.azurecontainerapps.io`
+
+## Azure CLI Setup
+
+The local environment uses Todyl SASE which performs SSL inspection. Azure CLI requires a custom CA bundle to work.
+
+**CA Bundle Location:** `C:\Users\CharlieCoutts\.azure\certs\ca-bundle.pem`
+
+**Always use the wrapper script for Azure CLI commands:**
+```bash
+bash /c/Users/CharlieCoutts/.azure/az-wrapper.sh <command>
+```
+
+Example:
+```bash
+bash /c/Users/CharlieCoutts/.azure/az-wrapper.sh containerapp logs show --name haloclaude-proxy --resource-group rg-haloclaude --tail 50
+```
+
+The wrapper sets `REQUESTS_CA_BUNDLE` and `SSL_CERT_FILE` environment variables automatically.
 
 ## Common Tasks
 
@@ -130,8 +141,11 @@ Currently deployed on Azure Container Apps:
 
 ### Debugging Issues
 
-1. Check Azure Container Apps logs: `az containerapp logs show --name litellm-proxy --resource-group rg-litellm --tail 100`
-2. Enable debug logging: Set `LITELLM_LOG=DEBUG` env var
+1. Check Azure Container Apps logs:
+   ```bash
+   bash /c/Users/CharlieCoutts/.azure/az-wrapper.sh containerapp logs show --name haloclaude-proxy --resource-group rg-haloclaude --tail 100
+   ```
+2. Enable debug logging: Set `LOG_LEVEL=DEBUG` env var on the container app
 3. Check Halo's AI logs in Configuration → Integrations → AI → Logs
 
 ### Testing Locally

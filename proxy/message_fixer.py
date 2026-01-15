@@ -8,6 +8,7 @@ Halo PSA sometimes sends messages that Claude's API rejects:
 This module fixes these issues before sending to Claude.
 """
 
+import copy
 import logging
 from typing import List, Dict, Any
 
@@ -28,16 +29,19 @@ class MessageFixer:
     def fix_messages(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Fix message array for Claude compatibility.
-        
+
         Args:
             messages: List of message dicts with 'role' and 'content'
-            
+
         Returns:
-            Fixed message list
+            Fixed message list (copy of original, original is not modified)
         """
         if not messages:
             return messages
-        
+
+        # Create a deep copy to avoid mutating the input
+        messages = copy.deepcopy(messages)
+
         # Fix empty content
         messages = self._fix_empty_content(messages)
         

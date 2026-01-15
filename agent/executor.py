@@ -21,7 +21,7 @@ MAX_TOOL_ROUNDS = 10
 
 class AgentExecutor:
     """Executes the agent loop with tool calling."""
-    
+
     def __init__(
         self,
         halo_client: HaloClient,
@@ -30,7 +30,7 @@ class AgentExecutor:
     ):
         """
         Initialize the agent executor.
-        
+
         Args:
             halo_client: Initialized Halo API client
             anthropic_api_key: Anthropic API key
@@ -38,7 +38,7 @@ class AgentExecutor:
         """
         self.halo_client = halo_client
         self.model = model
-        self.client = anthropic.Anthropic(api_key=anthropic_api_key)
+        self.client = anthropic.AsyncAnthropic(api_key=anthropic_api_key)
     
     async def run(
         self,
@@ -82,7 +82,7 @@ class AgentExecutor:
                 request_kwargs["tools"] = tools
             
             # Call Claude
-            response = self.client.messages.create(**request_kwargs)
+            response = await self.client.messages.create(**request_kwargs)
             
             logger.debug(f"Claude response stop_reason: {response.stop_reason}")
             

@@ -14,40 +14,7 @@ logger = logging.getLogger(__name__)
 
 class AzureOpenAITranslator:
     """Translates between Azure OpenAI and Claude API formats."""
-    
-    def to_claude_messages(
-        self, azure_messages: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
-        """
-        Convert Azure OpenAI messages to Claude format.
-        
-        Azure OpenAI and Claude use similar message formats, but there
-        are some differences in how system messages are handled.
-        
-        Args:
-            azure_messages: Messages in Azure OpenAI format
-            
-        Returns:
-            Messages in Claude format
-        """
-        claude_messages = []
-        system_content = None
-        
-        for msg in azure_messages:
-            role = msg.get("role")
-            content = msg.get("content", "")
-            
-            if role == "system":
-                # Claude handles system messages separately
-                system_content = content
-            else:
-                claude_messages.append({
-                    "role": role,
-                    "content": content,
-                })
-        
-        return claude_messages, system_content
-    
+
     def to_azure_openai(
         self,
         claude_response: Dict[str, Any],

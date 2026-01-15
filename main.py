@@ -60,13 +60,6 @@ app = FastAPI(
 )
 
 
-def verify_api_key(api_key: str = Header(alias="api-key")):
-    """Verify the API key matches our master key."""
-    if api_key != settings.litellm_master_key:
-        raise HTTPException(status_code=401, detail="Invalid API key")
-    return api_key
-
-
 @app.get("/")
 async def health_check():
     """Health check endpoint."""

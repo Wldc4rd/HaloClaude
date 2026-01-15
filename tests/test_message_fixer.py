@@ -74,10 +74,29 @@ class TestMessageFixer:
             {"role": "assistant", "content": "Response"},
         ]
         result = fixer.fix_messages(messages)
-        
+
         # Empty content should be fixed
         assert result[1]["content"] == fixer.EMPTY_CONTENT_REPLACEMENT
-        
+
         # User message should be appended
         assert len(result) == 4
         assert result[-1]["role"] == "user"
+
+    def test_original_not_mutated(self, fixer):
+        """Original messages should not be modified."""
+        messages = [
+            {"role": "user", "content": ""},
+            {"role": "assistant", "content": "Response"},
+        ]
+        original_len = len(messages)
+        original_content = messages[0]["content"]
+
+        result = fixer.fix_messages(messages)
+
+        # Original should be unchanged
+        assert len(messages) == original_len
+        assert messages[0]["content"] == original_content
+
+        # Result should be different
+        assert len(result) == original_len + 1
+        assert result[0]["content"] == fixer.EMPTY_CONTENT_REPLACEMENT

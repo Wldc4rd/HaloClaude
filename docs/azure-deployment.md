@@ -32,14 +32,15 @@ You can either use Azure Container Registry (ACR) or Docker Hub.
 #### Option A: Azure Container Registry
 
 ```powershell
-# Create ACR
-az acr create --name haloClaudeRegistry --resource-group rg-haloclaude --sku Basic
+# Create ACR (replace <companyname> with your company name, e.g., haloclauderegistry-soundit)
+# Note: ACR names must be lowercase, alphanumeric, and globally unique
+az acr create --name haloclauderegistry-<companyname> --resource-group rg-haloclaude --sku Basic
 
 # Login to ACR
-az acr login --name haloClaudeRegistry
+az acr login --name haloclauderegistry-<companyname>
 
 # Build and push
-az acr build --registry haloClaudeRegistry --image haloclaude:latest .
+az acr build --registry haloclauderegistry-<companyname> --image haloclaude:latest .
 ```
 
 #### Option B: Docker Hub
@@ -52,12 +53,13 @@ docker push yourusername/haloclaude:latest
 ### 4. Deploy Container App
 
 ```powershell
+# Replace <companyname> with your company name used in step 3
 az containerapp create `
     --name haloclaude-proxy `
     --resource-group rg-haloclaude `
     --environment haloclaude-env `
-    --image haloClaudeRegistry.azurecr.io/haloclaude:latest `
-    --registry-server haloClaudeRegistry.azurecr.io `
+    --image haloclauderegistry-<companyname>.azurecr.io/haloclaude:latest `
+    --registry-server haloclauderegistry-<companyname>.azurecr.io `
     --target-port 4000 `
     --ingress external `
     --min-replicas 1 `
@@ -98,14 +100,14 @@ az containerapp show `
 ### Update Image
 
 ```powershell
-# Rebuild and push new image
-az acr build --registry haloClaudeRegistry --image haloclaude:latest .
+# Rebuild and push new image (replace <companyname> with your company name)
+az acr build --registry haloclauderegistry-<companyname> --image haloclaude:latest .
 
 # Update container app
 az containerapp update `
     --name haloclaude-proxy `
     --resource-group rg-haloclaude `
-    --image haloClaudeRegistry.azurecr.io/haloclaude:latest
+    --image haloclauderegistry-<companyname>.azurecr.io/haloclaude:latest
 ```
 
 ### Update Environment Variables

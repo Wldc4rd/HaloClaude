@@ -1,0 +1,180 @@
+# Azure Container Apps Deployment
+
+This guide covers deploying HaloClaude to Azure Container Apps.
+
+## Prerequisites
+
+- Azure CLI installed and logged in
+- Azure subscription
+- Docker (for local testing)
+
+## Quick Deploy
+
+### 1. Create Resource Group
+
+```powershell
+az group create --name rg-haloclaude --location westus
+```
+
+### 2. Create Container Apps Environment
+
+```powershell
+az containerapp env create `
+    --name haloclaude-env `
+    --resource-group rg-haloclaude `
+    --location westus
+```
+
+### 3. Build and Push Container Image
+
+You can either use Azure Container Registry (ACR) or Docker Hub.
+
+#### Option A: Azure Container Registry
+
+```powershell
+# Create ACR
+az acr create --name haloClaudeRegistry --resource-group rg-haloclaude --sku Basic
+
+# Login to ACR
+az acr login --name haloClaudeRegistry
+
+# Build and push
+az acr build --registry haloClaudeRegistry --image haloclaude:latest .
+```
+
+#### Option B: Docker Hub
+
+```bash
+docker build -t yourusername/haloclaude:latest .
+docker push yourusername/haloclaude:latest
+```
+
+### 4. Deploy Container App
+
+```powershell
+az containerapp create `
+    --name haloclaude-proxy `
+    --resource-group rg-haloclaude `
+    --environment haloclaude-env `
+    --image haloClaudeRegistry.azurecr.io/haloclaude:latest `
+    --registry-server haloClaudeRegistry.azurecr.io `
+    --target-port 4000 `
+    --ingress external `
+    --min-replicas 1 `
+    --max-replicas 1 `
+    --env-vars `
+        "ANTHROPIC_API_KEY=secretref:anthropic-key" `
+        "HALO_API_URL=https://yourinstance.halopsa.com" `
+        "HALO_CLIENT_ID=secretref:halo-client-id" `
+        "HALO_CLIENT_SECRET=secretref:halo-client-secret" `
+        "LITELLM_MASTER_KEY=secretref:master-key"
+```
+
+### 5. Configure Secrets
+
+```powershell
+az containerapp secret set `
+    --name haloclaude-proxy `
+    --resource-group rg-haloclaude `
+    --secrets `
+        anthropic-key=sk-ant-your-key `
+        halo-client-id=your-client-id `
+        halo-client-secret=your-client-secret `
+        master-key=your-proxy-secret
+```
+
+### 6. Get Endpoint URL
+
+```powershell
+az containerapp show `
+    --name haloclaude-proxy `
+    --resource-group rg-haloclaude `
+    --query properties.configuration.ingress.fqdn `
+    -o tsv
+```
+
+## Updating the Deployment
+
+### Update Image
+
+```powershell
+# Rebuild and push new image
+az acr build --registry haloClaudeRegistry --image haloclaude:latest .
+
+# Update container app
+az containerapp update `
+    --name haloclaude-proxy `
+    --resource-group rg-haloclaude `
+    --image haloClaudeRegistry.azurecr.io/haloclaude:latest
+```
+
+### Update Environment Variables
+
+```powershell
+az containerapp update `
+    --name haloclaude-proxy `
+    --resource-group rg-haloclaude `
+    --set-env-vars "LOG_LEVEL=DEBUG"
+```
+
+### View Logs
+
+```powershell
+az containerapp logs show `
+    --name haloclaude-proxy `
+    --resource-group rg-haloclaude `
+    --tail 100 `
+    --follow
+```
+
+## Halo PSA Configuration
+
+Once deployed, configure Halo PSA:
+
+1. Go to **Configuration** → **Integrations** → **AI**
+2. Select **Own Azure OpenAI Connection**
+3. Configure:
+   - **Endpoint**: `https://haloclaude-proxy.xxxxx.azurecontainerapps.io`
+   - **API Key**: Your `LITELLM_MASTER_KEY` value
+   - **API Version**: `2024-02-01`
+   - **Default Azure OpenAI Deployment**: `claude-sonnet-4-5`
+
+## Cost Optimization
+
+Container Apps charges by resource usage:
+
+- **Always-on (min-replicas=1)**: ~$5-15/month for light usage
+- **Scale to zero (min-replicas=0)**: Pay only when requests come in, but cold starts may cause timeouts
+
+For production use with Halo, we recommend min-replicas=1 to avoid cold start delays.
+
+## Troubleshooting
+
+### Container Won't Start
+
+Check logs:
+```powershell
+az containerapp logs show --name haloclaude-proxy --resource-group rg-haloclaude --tail 50
+```
+
+### Authentication Errors
+
+Verify secrets are set correctly:
+```powershell
+az containerapp secret list --name haloclaude-proxy --resource-group rg-haloclaude
+```
+
+### Halo Returns Errors
+
+Check the AI logs in Halo: **Configuration** → **Integrations** → **AI** → **Logs**
+
+## Migrating from LiteLLM Proxy
+
+If you're migrating from the LiteLLM-based setup:
+
+1. Deploy the new HaloClaude container alongside the existing one
+2. Update Halo to point to the new endpoint
+3. Test thoroughly
+4. Remove the old LiteLLM container app
+
+The endpoint URL and authentication method remain the same, so Halo configuration changes are minimal.

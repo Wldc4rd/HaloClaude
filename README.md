@@ -23,19 +23,16 @@ A proxy server that enables Halo PSA to use Claude AI instead of OpenAI for tick
 └─────────────┘      └─────────────────────────────────────┘
 ```
 
-## Current Status
+## Status
 
-### Working (Phase 1 - LiteLLM Proxy)
-- ✅ Basic proxy translating Azure OpenAI requests to Claude
-- ✅ Fix for empty message content
-- ✅ Fix for conversations ending with assistant messages
-- ✅ Deployed on Azure Container Apps
+✅ **Fully Operational** - Deployed on Azure Container Apps with all features working:
 
-### In Development (Phase 2 - Tool Calling)
-- 🔲 Halo API authentication
-- 🔲 Tool definitions for Halo resources
-- 🔲 Agentic tool execution loop
-- 🔲 Response caching
+- Azure OpenAI → Claude API translation
+- Message format fixing (empty content, assistant endings)
+- Halo API OAuth authentication
+- All 9 tool definitions for Halo resources
+- Agentic tool execution loop
+- Support for Claude Sonnet and Opus models
 
 ## Prerequisites
 
@@ -49,10 +46,12 @@ A proxy server that enables Halo PSA to use Claude AI instead of OpenAI for tick
 | Variable | Description |
 |----------|-------------|
 | `ANTHROPIC_API_KEY` | Your Anthropic API key |
+| `ANTHROPIC_MODEL` | Claude model to use (default: `claude-sonnet-4-5-20250929`) |
 | `HALO_API_URL` | Your Halo instance URL (e.g., `https://yourcompany.halopsa.com`) |
 | `HALO_CLIENT_ID` | Halo API application Client ID |
 | `HALO_CLIENT_SECRET` | Halo API application Client Secret |
 | `LITELLM_MASTER_KEY` | Secret key to protect the proxy endpoint |
+| `LOG_LEVEL` | Logging level (default: `INFO`) |
 
 ## Quick Start
 
@@ -60,8 +59,8 @@ A proxy server that enables Halo PSA to use Claude AI instead of OpenAI for tick
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/haloclaude.git
-cd haloclaude
+git clone https://github.com/Wldc4rd/HaloClaude.git
+cd HaloClaude
 
 # Create virtual environment
 python -m venv .venv
@@ -97,11 +96,22 @@ See [docs/azure-deployment.md](docs/azure-deployment.md) for detailed deployment
    - **Endpoint**: Your proxy URL (e.g., `https://your-proxy.azurecontainerapps.io`)
    - **API Key**: Your `LITELLM_MASTER_KEY`
    - **API Version**: `2024-02-01`
-   - **Default Azure OpenAI Deployment**: `claude-sonnet-4-5`
+   - **Default Azure OpenAI Deployment**: `claude-sonnet-4-5` or `claude-opus-4-5`
 
-## Available Tools (Phase 2)
+### Halo API Application Setup
 
-When Phase 2 is complete, Claude will have access to these tools:
+1. Go to **Configuration** → **Integrations** → **Halo API**
+2. Create a new API application
+3. Note the **Client ID** and **Client Secret**
+4. Ensure the associated **Agent** has permissions to:
+   - View tickets
+   - View users/clients
+   - View assets
+   - View knowledge base articles
+
+## Available Tools
+
+Claude has access to these tools for fetching Halo context:
 
 | Tool | Description |
 |------|-------------|
@@ -110,48 +120,37 @@ When Phase 2 is complete, Claude will have access to these tools:
 | `get_user_tickets` | Get other tickets for a user |
 | `get_client` | Get company/client information |
 | `get_client_tickets` | Get recent tickets for a company |
-| `search_kb` | Search the knowledge base |
 | `get_asset` | Get asset/device details |
-| `get_actions` | Get available actions for a ticket |
+| `search_tickets` | Search for tickets by keyword |
+| `search_kb` | Search the knowledge base |
+| `get_kb_article` | Get full knowledge base article content |
 
 ## Project Structure
 
 ```
-haloclaude/
+HaloClaude/
 ├── main.py                 # FastAPI application entry point
 ├── config.py               # Configuration management
 ├── proxy/
-│   ├── __init__.py
 │   ├── translator.py       # Azure OpenAI ↔ Claude translation
 │   └── message_fixer.py    # Message format corrections
 ├── halo/
-│   ├── __init__.py
 │   ├── auth.py             # Halo OAuth token management
 │   ├── client.py           # Halo API client
 │   └── tools.py            # Tool definitions for Claude
 ├── agent/
-│   ├── __init__.py
 │   └── executor.py         # Tool execution loop
 ├── tests/
-│   └── ...
+│   └── test_message_fixer.py
 ├── docs/
-│   ├── azure-deployment.md
-│   └── halo-api-reference.md
+│   └── azure-deployment.md
 ├── .env.example
 ├── requirements.txt
 ├── Dockerfile
+├── CLAUDE.md               # Context for Claude Code
 └── README.md
 ```
-
-## Contributing
-
-Contributions welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) first.
 
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
-
-## Acknowledgments
-
-- Built with [LiteLLM](https://github.com/BerriAI/litellm) for initial proxy functionality
-- Inspired by the need to use Claude's superior reasoning in Halo PSA

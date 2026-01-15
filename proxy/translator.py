@@ -18,25 +18,26 @@ class AzureOpenAITranslator:
     def to_azure_openai(
         self,
         claude_response: Dict[str, Any],
-        model: str = "claude-sonnet-4-5-20250929"
     ) -> Dict[str, Any]:
         """
         Convert Claude response to Azure OpenAI format.
-        
+
         Args:
             claude_response: Response from Claude API
-            model: Model name to include in response
-            
+
         Returns:
             Response in Azure OpenAI format
         """
         # Extract content from Claude response
         content = self._extract_content(claude_response)
-        
+
+        # Get model from Claude response
+        model = claude_response.get("model", "claude")
+
         # Calculate tokens
         input_tokens = claude_response.get("usage", {}).get("input_tokens", 0)
         output_tokens = claude_response.get("usage", {}).get("output_tokens", 0)
-        
+
         # Build Azure OpenAI format response
         return {
             "id": f"chatcmpl-{uuid.uuid4()}",

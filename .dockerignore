@@ -1,0 +1,36 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv
+venv/
+ENV/
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+
+# Testing
+tests/
+htmlcov/
+.coverage
+
+# Development
+.env
+.env.*
+*.md
+!README.md
+
+# Claude
+.claude/
+
+# Misc
+nul
+*.log

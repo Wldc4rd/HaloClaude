@@ -35,8 +35,15 @@ Registration can take 1-2 minutes. Wait until both show `Registered` before proc
 4. If this is your first time, it will create a storage account - click **Create storage**
 5. Once the shell loads, clone the repository:
 
+**For public repos:**
 ```powershell
-git clone https://github.com/Wldc4rd/HaloClaude.git
+git clone https://github.com/<your-org>/HaloClaude.git
+cd HaloClaude
+```
+
+**For private repos** (create a [Personal Access Token](https://github.com/settings/tokens) with `repo` scope first):
+```powershell
+git clone https://<github-username>:<your-pat>@github.com/<your-org>/HaloClaude.git
 cd HaloClaude
 ```
 

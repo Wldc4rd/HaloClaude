@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     # Application
     log_level: str = "INFO"
 
+    # Context injection
+    context_injection_enabled: bool = True
+    context_cache_ttl: int = 300  # seconds
+
     model_config = ConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

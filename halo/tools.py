@@ -20,8 +20,9 @@ def get_halo_tools() -> List[Dict[str, Any]]:
             "name": "get_ticket",
             "description": (
                 "Get detailed information about a specific ticket including its "
-                "full history, status, priority, and all associated data. Use this "
-                "when you need complete context about a ticket."
+                "full history, status, priority, and all associated data. "
+                "NOTE: The current ticket's data has been pre-fetched and is in the "
+                "context above. Use this tool only for OTHER tickets."
             ),
             "input_schema": {
                 "type": "object",
@@ -38,8 +39,9 @@ def get_halo_tools() -> List[Dict[str, Any]]:
             "name": "get_user",
             "description": (
                 "Get information about a user including their contact details, "
-                "company affiliation, and role. Use this to understand who you're "
-                "helping and their context."
+                "company affiliation, and role. "
+                "NOTE: The current ticket's user data has been pre-fetched and is in the "
+                "context above. Use this tool only for OTHER users."
             ),
             "input_schema": {
                 "type": "object",
@@ -84,8 +86,9 @@ def get_halo_tools() -> List[Dict[str, Any]]:
             "name": "get_client",
             "description": (
                 "Get information about a client/company including their details, "
-                "service level, and configuration. Use this to understand the "
-                "business context."
+                "service level, and configuration. "
+                "NOTE: The current ticket's client/company data has been pre-fetched "
+                "and is in the context above. Use this tool only for OTHER clients."
             ),
             "input_schema": {
                 "type": "object",
@@ -130,8 +133,9 @@ def get_halo_tools() -> List[Dict[str, Any]]:
             "name": "get_asset",
             "description": (
                 "Get information about an asset/device including its configuration, "
-                "specifications, and history. Use this when the ticket involves "
-                "specific hardware or devices."
+                "specifications, and history. "
+                "NOTE: Assets linked to the current ticket have been pre-fetched "
+                "and are in the context above. Use this tool only for OTHER assets."
             ),
             "input_schema": {
                 "type": "object",

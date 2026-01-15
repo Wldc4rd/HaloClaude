@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 import anthropic
 
 from halo.client import HaloClient
+from context.injector import ContextInjector
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,8 @@ class AgentExecutor:
         halo_client: HaloClient,
         anthropic_api_key: str,
         model: str = "claude-sonnet-4-5-20250929",
+        context_injection_enabled: bool = True,
+        context_cache_ttl: int = 300,
     ):
         """
         Initialize the agent executor.
@@ -35,10 +38,17 @@ class AgentExecutor:
             halo_client: Initialized Halo API client
             anthropic_api_key: Anthropic API key
             model: Claude model to use
+            context_injection_enabled: Whether to pre-fetch and inject Halo context
+            context_cache_ttl: Cache time-to-live for context in seconds
         """
         self.halo_client = halo_client
         self.model = model
         self.client = anthropic.AsyncAnthropic(api_key=anthropic_api_key)
+        self.context_injector = ContextInjector(
+            halo_client=halo_client,
+            enabled=context_injection_enabled,
+            cache_ttl=context_cache_ttl,
+        )
     
     async def run(
         self,
@@ -60,7 +70,10 @@ class AgentExecutor:
         # Extract system message if present
         if system is None:
             messages, system = self._extract_system(messages)
-        
+
+        # Inject Halo context into system prompt
+        system = await self.context_injector.inject_context(system)
+
         current_messages = list(messages)
         tool_round = 0
         

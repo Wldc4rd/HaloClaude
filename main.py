@@ -43,6 +43,8 @@ async def lifespan(app: FastAPI):
         halo_client=app.state.halo_client,
         anthropic_api_key=settings.anthropic_api_key,
         model=settings.anthropic_model,
+        context_injection_enabled=settings.context_injection_enabled,
+        context_cache_ttl=settings.context_cache_ttl,
     )
     
     yield

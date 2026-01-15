@@ -93,40 +93,40 @@ docker push yourusername/haloclaude:latest
 
 ### 4. Deploy Container App
 
+Replace the placeholder values below with your actual credentials:
+- `<companyname>` - your company name from step 3
+- `<your-anthropic-api-key>` - your Anthropic API key (starts with `sk-ant-`)
+- `<your-halo-instance>` - your Halo PSA subdomain (e.g., `yourcompany` for `yourcompany.halopsa.com`)
+- `<your-halo-client-id>` - Halo API application client ID
+- `<your-halo-client-secret>` - Halo API application client secret
+- `<your-proxy-api-key>` - a secret key you create for Halo to authenticate with this proxy
+
 ```powershell
-# Replace <companyname> with your company name used in step 3
 az containerapp create `
     --name haloclaude-proxy `
     --resource-group rg-haloclaude `
     --environment haloclaude-env `
     --image haloclauderegistry<companyname>.azurecr.io/haloclaude:latest `
     --registry-server haloclauderegistry<companyname>.azurecr.io `
+    --registry-identity system `
     --target-port 4000 `
     --ingress external `
     --min-replicas 1 `
     --max-replicas 1 `
-    --env-vars `
-        "ANTHROPIC_API_KEY=secretref:anthropic-key" `
-        "HALO_API_URL=https://yourinstance.halopsa.com" `
-        "HALO_CLIENT_ID=secretref:halo-client-id" `
-        "HALO_CLIENT_SECRET=secretref:halo-client-secret" `
-        "LITELLM_MASTER_KEY=secretref:master-key"
-```
-
-### 5. Configure Secrets
-
-```powershell
-az containerapp secret set `
-    --name haloclaude-proxy `
-    --resource-group rg-haloclaude `
     --secrets `
-        anthropic-key=sk-ant-your-key `
-        halo-client-id=your-client-id `
-        halo-client-secret=your-client-secret `
-        master-key=your-proxy-secret
+        anthropic-key=<your-anthropic-api-key> `
+        halo-client-id=<your-halo-client-id> `
+        halo-client-secret=<your-halo-client-secret> `
+        master-key=<your-proxy-api-key> `
+    --env-vars `
+        ANTHROPIC_API_KEY=secretref:anthropic-key `
+        HALO_API_URL=https://<your-halo-instance>.halopsa.com `
+        HALO_CLIENT_ID=secretref:halo-client-id `
+        HALO_CLIENT_SECRET=secretref:halo-client-secret `
+        LITELLM_MASTER_KEY=secretref:master-key
 ```
 
-### 6. Get Endpoint URL
+### 5. Get Endpoint URL
 
 ```powershell
 az containerapp show `

@@ -4,9 +4,27 @@ This guide covers deploying HaloClaude to Azure Container Apps.
 
 ## Prerequisites
 
-- Azure CLI installed and logged in
-- Azure subscription
-- Docker (for local testing)
+- Azure CLI installed and logged in (`az login`)
+- Azure subscription with required resource providers registered (see below)
+- Docker (for local testing, optional if using ACR build)
+
+### Register Required Resource Providers
+
+Azure subscriptions need resource providers registered before using certain services. Run these commands once per subscription:
+
+```powershell
+# Register Container Registry provider
+az provider register --namespace Microsoft.ContainerRegistry
+
+# Register Container Apps provider
+az provider register --namespace Microsoft.App
+
+# Check registration status (wait until both show "Registered")
+az provider show --namespace Microsoft.ContainerRegistry --query "registrationState" -o tsv
+az provider show --namespace Microsoft.App --query "registrationState" -o tsv
+```
+
+Registration can take 1-2 minutes. Wait until both show `Registered` before proceeding.
 
 ## Quick Deploy
 

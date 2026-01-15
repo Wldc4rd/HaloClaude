@@ -32,15 +32,15 @@ You can either use Azure Container Registry (ACR) or Docker Hub.
 #### Option A: Azure Container Registry
 
 ```powershell
-# Create ACR (replace <companyname> with your company name, e.g., haloclauderegistry-soundit)
-# Note: ACR names must be lowercase, alphanumeric, and globally unique
-az acr create --name haloclauderegistry-<companyname> --resource-group rg-haloclaude --sku Basic
+# Create ACR (replace <companyname> with your company name, e.g., haloclauderegistrysoundit)
+# Note: ACR names must be lowercase, alphanumeric only (no dashes/underscores), and globally unique
+az acr create --name haloclauderegistry<companyname> --resource-group rg-haloclaude --sku Basic
 
 # Login to ACR
-az acr login --name haloclauderegistry-<companyname>
+az acr login --name haloclauderegistry<companyname>
 
 # Build and push
-az acr build --registry haloclauderegistry-<companyname> --image haloclaude:latest .
+az acr build --registry haloclauderegistry<companyname> --image haloclaude:latest .
 ```
 
 #### Option B: Docker Hub
@@ -58,8 +58,8 @@ az containerapp create `
     --name haloclaude-proxy `
     --resource-group rg-haloclaude `
     --environment haloclaude-env `
-    --image haloclauderegistry-<companyname>.azurecr.io/haloclaude:latest `
-    --registry-server haloclauderegistry-<companyname>.azurecr.io `
+    --image haloclauderegistry<companyname>.azurecr.io/haloclaude:latest `
+    --registry-server haloclauderegistry<companyname>.azurecr.io `
     --target-port 4000 `
     --ingress external `
     --min-replicas 1 `
@@ -101,13 +101,13 @@ az containerapp show `
 
 ```powershell
 # Rebuild and push new image (replace <companyname> with your company name)
-az acr build --registry haloclauderegistry-<companyname> --image haloclaude:latest .
+az acr build --registry haloclauderegistry<companyname> --image haloclaude:latest .
 
 # Update container app
 az containerapp update `
     --name haloclaude-proxy `
     --resource-group rg-haloclaude `
-    --image haloclauderegistry-<companyname>.azurecr.io/haloclaude:latest
+    --image haloclauderegistry<companyname>.azurecr.io/haloclaude:latest
 ```
 
 ### Update Environment Variables

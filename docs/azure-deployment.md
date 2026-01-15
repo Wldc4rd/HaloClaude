@@ -4,9 +4,10 @@ This guide covers deploying HaloClaude to Azure Container Apps.
 
 ## Prerequisites
 
-- Azure CLI installed and logged in (`az login`)
 - Azure subscription with required resource providers registered (see below)
-- Docker (for local testing, optional if using ACR build)
+- One of the following:
+  - **Azure Cloud Shell** (recommended, no install needed) - access via portal.azure.com
+  - **Azure CLI installed locally** - download from https://aka.ms/installazurecliwindows
 
 ### Register Required Resource Providers
 
@@ -25,6 +26,21 @@ az provider show --namespace Microsoft.App --query "registrationState" -o tsv
 ```
 
 Registration can take 1-2 minutes. Wait until both show `Registered` before proceeding.
+
+### Using Azure Cloud Shell
+
+1. Go to [portal.azure.com](https://portal.azure.com)
+2. Click the **Cloud Shell** icon in the top navigation bar (looks like `>_`)
+3. If prompted, select **PowerShell** (or Bash, both work)
+4. If this is your first time, it will create a storage account - click **Create storage**
+5. Once the shell loads, clone the repository:
+
+```powershell
+git clone https://github.com/Wldc4rd/HaloClaude.git
+cd HaloClaude
+```
+
+Now you can run all the commands below from Cloud Shell.
 
 ## Quick Deploy
 

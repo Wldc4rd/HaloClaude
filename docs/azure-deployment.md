@@ -151,6 +151,11 @@ az containerapp update `
     --image haloclauderegistry<companyname>.azurecr.io/haloclaude:latest
 ```
 
+**Note:** If changes don't take effect, stop and start the container app via the Azure Portal:
+1. Go to your Container App in the Azure Portal
+2. Click **Stop** and wait for it to stop
+3. Click **Start**
+
 ### Update Environment Variables
 
 ```powershell
@@ -159,6 +164,26 @@ az containerapp update `
     --resource-group rg-haloclaude `
     --set-env-vars "LOG_LEVEL=DEBUG"
 ```
+
+### Change Claude Model
+
+To switch between Claude models (e.g., Sonnet vs Opus):
+
+```powershell
+# Use Claude Opus 4.5
+az containerapp update `
+    --name haloclaude-proxy `
+    --resource-group rg-haloclaude `
+    --set-env-vars "ANTHROPIC_MODEL=claude-opus-4-5-20251101"
+
+# Use Claude Sonnet 4.5 (default)
+az containerapp update `
+    --name haloclaude-proxy `
+    --resource-group rg-haloclaude `
+    --set-env-vars "ANTHROPIC_MODEL=claude-sonnet-4-5-20250929"
+```
+
+After changing, stop and start the container app via Azure Portal for changes to take effect.
 
 ### View Logs
 

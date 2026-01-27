@@ -9,6 +9,7 @@ import logging
 from fastapi import FastAPI, Request, HTTPException, Header
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
+import anthropic
 
 from config import get_settings
 from proxy.translator import AzureOpenAITranslator
@@ -110,13 +111,39 @@ async def chat_completions(
         logger.debug(f"Returning response: {azure_response}")
         return JSONResponse(content=azure_response)
         
+    except anthropic.APIStatusError as e:
+        logger.error(f"Anthropic API error: {e.status_code} - {e.message}")
+
+        # Map Anthropic errors to user-friendly messages
+        if e.status_code == 529:
+            user_message = "The AI service is temporarily busy. Please try again in a moment."
+        elif e.status_code == 503:
+            user_message = "The AI service is temporarily unavailable. Please try again shortly."
+        elif e.status_code == 429:
+            user_message = "Too many requests to the AI service. Please wait a moment and try again."
+        elif e.status_code == 401:
+            user_message = "AI service authentication error. Please contact your administrator."
+        else:
+            user_message = "An error occurred with the AI service. Please try again."
+
+        return JSONResponse(
+            status_code=e.status_code,
+            content={
+                "error": {
+                    "message": user_message,
+                    "type": "api_error",
+                    "code": str(e.status_code)
+                }
+            }
+        )
+
     except Exception as e:
         logger.exception(f"Error processing request: {e}")
         return JSONResponse(
             status_code=500,
             content={
                 "error": {
-                    "message": str(e),
+                    "message": "An unexpected error occurred. Please try again.",
                     "type": "internal_error",
                     "code": "500"
                 }

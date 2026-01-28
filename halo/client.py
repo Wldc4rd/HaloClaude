@@ -56,8 +56,8 @@ class HaloClient:
         method: str,
         endpoint: str,
         params: Optional[Dict[str, Any]] = None,
-        json: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        json: Optional[Any] = None,
+    ) -> Any:
         """
         Make an authenticated request to Halo API.
         
@@ -122,6 +122,166 @@ class HaloClient:
         })
         return result.get("actions", [])
     
+    async def create_ticket_note(
+        self,
+        ticket_id: int,
+        note: str,
+        hiddenfromuser: bool = True,
+        action_id: Optional[int] = None,
+    ) -> Any:
+        """
+        Create or update a note/action on a ticket.
+
+        Args:
+            ticket_id: The ticket ID
+            note: Note content (supports HTML)
+            hiddenfromuser: If True, note is private/agent-only
+            action_id: If provided, updates an existing action instead of creating
+
+        Returns:
+            Created/updated action details
+        """
+        action = {
+            "ticket_id": ticket_id,
+            "note": note,
+            "hiddenfromuser": hiddenfromuser,
+            "outcome": "Note",
+        }
+        if action_id is not None:
+            action["id"] = action_id
+            logger.info(f"Updating note {action_id} on ticket {ticket_id}")
+        else:
+            logger.info(f"Creating note on ticket {ticket_id} (private={hiddenfromuser})")
+        return await self._request("POST", "actions", json=[action])
+
+    async def create_ticket(
+        self,
+        summary: str,
+        client_id: int,
+        details: Optional[str] = None,
+        user_id: Optional[int] = None,
+        priority_id: Optional[int] = None,
+        ticket_type_id: Optional[int] = None,
+        category_1: Optional[str] = None,
+        category_2: Optional[str] = None,
+    ) -> Any:
+        """
+        Create a new ticket.
+
+        Args:
+            summary: Ticket summary/subject
+            client_id: Client/company ID
+            details: Ticket description/details
+            user_id: Reporting user ID
+            priority_id: Priority level ID
+            ticket_type_id: Ticket type ID
+            category_1: Primary category
+            category_2: Secondary category
+
+        Returns:
+            Created ticket details
+        """
+        logger.info(f"Creating ticket: {summary}")
+        ticket: Dict[str, Any] = {
+            "summary": summary,
+            "client_id": client_id,
+        }
+        if details is not None:
+            ticket["details"] = details
+        if user_id is not None:
+            ticket["user_id"] = user_id
+        if priority_id is not None:
+            ticket["priority_id"] = priority_id
+        if ticket_type_id is not None:
+            ticket["tickettype_id"] = ticket_type_id
+        if category_1 is not None:
+            ticket["category_1"] = category_1
+        if category_2 is not None:
+            ticket["category_2"] = category_2
+        return await self._request("POST", "tickets", json=[ticket])
+
+    async def update_ticket(
+        self,
+        ticket_id: int,
+        summary: Optional[str] = None,
+        details: Optional[str] = None,
+        priority_id: Optional[int] = None,
+        ticket_type_id: Optional[int] = None,
+        category_1: Optional[str] = None,
+        category_2: Optional[str] = None,
+        agent_id: Optional[int] = None,
+        team_id: Optional[int] = None,
+        status_id: Optional[int] = None,
+    ) -> Any:
+        """
+        Update an existing ticket.
+
+        Args:
+            ticket_id: The ticket ID to update
+            summary: New summary/subject
+            details: New description/details
+            priority_id: New priority level ID
+            ticket_type_id: New ticket type ID
+            category_1: New primary category
+            category_2: New secondary category
+            agent_id: New assigned agent ID
+            team_id: New assigned team ID
+            status_id: New status ID
+
+        Returns:
+            Updated ticket details
+        """
+        logger.info(f"Updating ticket {ticket_id}")
+        ticket: Dict[str, Any] = {"id": ticket_id}
+        if summary is not None:
+            ticket["summary"] = summary
+        if details is not None:
+            ticket["details"] = details
+        if priority_id is not None:
+            ticket["priority_id"] = priority_id
+        if ticket_type_id is not None:
+            ticket["tickettype_id"] = ticket_type_id
+        if category_1 is not None:
+            ticket["category_1"] = category_1
+        if category_2 is not None:
+            ticket["category_2"] = category_2
+        if agent_id is not None:
+            ticket["agent_id"] = agent_id
+        if team_id is not None:
+            ticket["team_id"] = team_id
+        if status_id is not None:
+            ticket["status_id"] = status_id
+        return await self._request("POST", "tickets", json=[ticket])
+
+    async def close_ticket(
+        self,
+        ticket_id: int,
+        note: Optional[str] = None,
+    ) -> Any:
+        """
+        Close/resolve a ticket with an optional closure note.
+
+        Args:
+            ticket_id: The ticket ID to close
+            note: Optional closure note (private by default)
+
+        Returns:
+            Updated ticket details
+        """
+        logger.info(f"Closing ticket {ticket_id}")
+        result = await self._request(
+            "POST",
+            "tickets",
+            json=[{"id": ticket_id, "status_id": 9}],
+        )
+        if note:
+            await self.create_ticket_note(
+                ticket_id=ticket_id,
+                note=note,
+                hiddenfromuser=True,
+            )
+        return result
+
     async def search_tickets(
         self,
         query: str,

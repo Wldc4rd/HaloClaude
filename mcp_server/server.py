@@ -80,6 +80,128 @@ async def get_ticket_actions(ticket_id: int) -> List[Dict[str, Any]]:
 
 
 @mcp.tool(
+    description="Create a new ticket in Halo PSA. Requires a summary and client_id. "
+    "Optionally provide details, user, priority, type, and categories."
+)
+async def create_ticket(
+    summary: str,
+    client_id: int,
+    details: Optional[str] = None,
+    user_id: Optional[int] = None,
+    priority_id: Optional[int] = None,
+    ticket_type_id: Optional[int] = None,
+    category_1: Optional[str] = None,
+    category_2: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Create a new ticket in Halo PSA.
+
+    Args:
+        summary: Ticket summary/subject line
+        client_id: Client/company ID
+        details: Ticket description/details (supports HTML)
+        user_id: Reporting user ID
+        priority_id: Priority level ID
+        ticket_type_id: Ticket type ID
+        category_1: Primary category
+        category_2: Secondary category
+    """
+    logger.info(f"MCP: create_ticket called with summary={summary}")
+    client = get_halo_client()
+    return await client.create_ticket(
+        summary, client_id, details, user_id,
+        priority_id, ticket_type_id, category_1, category_2,
+    )
+
+
+@mcp.tool(
+    description="Update fields on an existing ticket. Provide ticket_id and any "
+    "fields to change. Only provided fields will be updated."
+)
+async def update_ticket(
+    ticket_id: int,
+    summary: Optional[str] = None,
+    details: Optional[str] = None,
+    priority_id: Optional[int] = None,
+    ticket_type_id: Optional[int] = None,
+    category_1: Optional[str] = None,
+    category_2: Optional[str] = None,
+    agent_id: Optional[int] = None,
+    team_id: Optional[int] = None,
+    status_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Update an existing ticket in Halo PSA.
+
+    Args:
+        ticket_id: The ticket ID to update
+        summary: New summary/subject line
+        details: New description/details (supports HTML)
+        priority_id: New priority level ID
+        ticket_type_id: New ticket type ID
+        category_1: New primary category
+        category_2: New secondary category
+        agent_id: New assigned agent ID
+        team_id: New assigned team ID
+        status_id: New status ID
+    """
+    logger.info(f"MCP: update_ticket called on ticket_id={ticket_id}")
+    client = get_halo_client()
+    return await client.update_ticket(
+        ticket_id, summary, details, priority_id,
+        ticket_type_id, category_1, category_2,
+        agent_id, team_id, status_id,
+    )
+
+
+@mcp.tool(
+    description="Close/resolve a ticket. Optionally include a private closure note "
+    "summarizing the resolution."
+)
+async def close_ticket(
+    ticket_id: int,
+    note: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Close/resolve a ticket in Halo PSA.
+
+    Args:
+        ticket_id: The ticket ID to close
+        note: Optional closure/resolution note (private by default)
+    """
+    logger.info(f"MCP: close_ticket called on ticket_id={ticket_id}")
+    client = get_halo_client()
+    return await client.close_ticket(ticket_id, note)
+
+
+@mcp.tool(
+    description="Create or update a note on a ticket. "
+    "To create a new note, provide ticket_id and note. "
+    "To update an existing note, also provide action_id. "
+    "Defaults to a private/agent-only note. "
+    "Set hiddenfromuser to false to make the note visible to the end user."
+)
+async def create_ticket_note(
+    ticket_id: int,
+    note: str,
+    hiddenfromuser: bool = True,
+    action_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Create or update a note/action on a Halo PSA ticket.
+
+    Args:
+        ticket_id: The ticket ID to add the note to
+        note: The note content (supports HTML)
+        hiddenfromuser: If true, note is private/agent-only (default true)
+        action_id: The action ID to update. Omit to create a new note.
+    """
+    logger.info(f"MCP: create_ticket_note called on ticket_id={ticket_id}, action_id={action_id}")
+    client = get_halo_client()
+    return await client.create_ticket_note(ticket_id, note, hiddenfromuser, action_id)
+
+
+@mcp.tool(
     description="Search for tickets matching a query. Use this to find "
     "related tickets, similar issues, or past resolutions."
 )

@@ -245,7 +245,47 @@ class AgentExecutor:
             
             elif tool_name == "get_kb_article":
                 return await self.halo_client.get_kb_article(tool_input["article_id"])
-            
+
+            elif tool_name == "create_ticket":
+                return await self.halo_client.create_ticket(
+                    summary=tool_input["summary"],
+                    client_id=tool_input["client_id"],
+                    details=tool_input.get("details"),
+                    user_id=tool_input.get("user_id"),
+                    priority_id=tool_input.get("priority_id"),
+                    ticket_type_id=tool_input.get("ticket_type_id"),
+                    category_1=tool_input.get("category_1"),
+                    category_2=tool_input.get("category_2"),
+                )
+
+            elif tool_name == "update_ticket":
+                return await self.halo_client.update_ticket(
+                    ticket_id=tool_input["ticket_id"],
+                    summary=tool_input.get("summary"),
+                    details=tool_input.get("details"),
+                    priority_id=tool_input.get("priority_id"),
+                    ticket_type_id=tool_input.get("ticket_type_id"),
+                    category_1=tool_input.get("category_1"),
+                    category_2=tool_input.get("category_2"),
+                    agent_id=tool_input.get("agent_id"),
+                    team_id=tool_input.get("team_id"),
+                    status_id=tool_input.get("status_id"),
+                )
+
+            elif tool_name == "close_ticket":
+                return await self.halo_client.close_ticket(
+                    ticket_id=tool_input["ticket_id"],
+                    note=tool_input.get("note"),
+                )
+
+            elif tool_name == "create_ticket_note":
+                return await self.halo_client.create_ticket_note(
+                    ticket_id=tool_input["ticket_id"],
+                    note=tool_input["note"],
+                    hiddenfromuser=tool_input.get("hiddenfromuser", True),
+                    action_id=tool_input.get("action_id"),
+                )
+
             else:
                 return {"error": f"Unknown tool: {tool_name}"}
                 

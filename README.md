@@ -118,62 +118,14 @@ See [docs/azure-deployment.md](docs/azure-deployment.md) for detailed deployment
 
 The proxy includes an MCP (Model Context Protocol) server that allows Claude Desktop to directly access Halo PSA tools for ticket lookup, searching, and management.
 
-### Prerequisites
+See [docs/claude-desktop-setup.md](docs/claude-desktop-setup.md) for full setup instructions and troubleshooting.
 
-1. Install `mcp-remote` (required because Claude Desktop doesn't natively support HTTP MCP servers):
-   ```bash
-   npm install -g mcp-remote
-   ```
-
-### Configuration
-
-Add this to your Claude Desktop config file:
-
-**Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
-**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-
-```json
-{
-  "mcpServers": {
-    "haloclaude": {
-      "command": "npx",
-      "args": [
-        "mcp-remote",
-        "https://haloclaude-proxy.ashysky-0dacd66d.westus.azurecontainerapps.io/mcp/mcp",
-        "--header",
-        "Authorization: Bearer YOUR_LITELLM_MASTER_KEY"
-      ]
-    }
-  }
-}
-```
-
-For local development, use:
-```json
-{
-  "mcpServers": {
-    "haloclaude-local": {
-      "command": "npx",
-      "args": [
-        "mcp-remote",
-        "http://localhost:4000/mcp/mcp",
-        "--allow-http",
-        "--header",
-        "Authorization: Bearer YOUR_LITELLM_MASTER_KEY"
-      ]
-    }
-  }
-}
-```
-
-### Usage
-
-After restarting Claude Desktop, you can ask Claude to:
+After setup, you can ask Claude Desktop to:
 - "Look up ticket #12345"
 - "Search for tickets about VPN issues"
-- "Get the details for user ID 789"
-- "Find recent tickets for Acme Corp (client ID 456)"
-- "Search the knowledge base for password reset procedures"
+- "Create a ticket for Acme Corp about their printer issue"
+- "Add a private note to ticket #12345 summarizing our findings"
+- "Close ticket #12345 with a resolution note"
 
 ## Automatic Context Injection
 

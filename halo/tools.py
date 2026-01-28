@@ -218,4 +218,156 @@ def get_halo_tools() -> List[Dict[str, Any]]:
                 "required": ["article_id"],
             },
         },
+        {
+            "name": "create_ticket",
+            "description": (
+                "Create a new ticket in Halo PSA. Requires a summary and client_id. "
+                "Optionally provide details, user, priority, type, and categories."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "summary": {
+                        "type": "string",
+                        "description": "Ticket summary/subject line",
+                    },
+                    "client_id": {
+                        "type": "integer",
+                        "description": "Client/company ID",
+                    },
+                    "details": {
+                        "type": "string",
+                        "description": "Ticket description/details (supports HTML)",
+                    },
+                    "user_id": {
+                        "type": "integer",
+                        "description": "Reporting user ID",
+                    },
+                    "priority_id": {
+                        "type": "integer",
+                        "description": "Priority level ID",
+                    },
+                    "ticket_type_id": {
+                        "type": "integer",
+                        "description": "Ticket type ID",
+                    },
+                    "category_1": {
+                        "type": "string",
+                        "description": "Primary category",
+                    },
+                    "category_2": {
+                        "type": "string",
+                        "description": "Secondary category",
+                    },
+                },
+                "required": ["summary", "client_id"],
+            },
+        },
+        {
+            "name": "update_ticket",
+            "description": (
+                "Update fields on an existing ticket. Provide ticket_id and any "
+                "fields to change. Only provided fields will be updated."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "ticket_id": {
+                        "type": "integer",
+                        "description": "The ticket ID to update",
+                    },
+                    "summary": {
+                        "type": "string",
+                        "description": "New summary/subject line",
+                    },
+                    "details": {
+                        "type": "string",
+                        "description": "New description/details (supports HTML)",
+                    },
+                    "priority_id": {
+                        "type": "integer",
+                        "description": "New priority level ID",
+                    },
+                    "ticket_type_id": {
+                        "type": "integer",
+                        "description": "New ticket type ID",
+                    },
+                    "category_1": {
+                        "type": "string",
+                        "description": "New primary category",
+                    },
+                    "category_2": {
+                        "type": "string",
+                        "description": "New secondary category",
+                    },
+                    "agent_id": {
+                        "type": "integer",
+                        "description": "New assigned agent ID",
+                    },
+                    "team_id": {
+                        "type": "integer",
+                        "description": "New assigned team ID",
+                    },
+                    "status_id": {
+                        "type": "integer",
+                        "description": "New status ID",
+                    },
+                },
+                "required": ["ticket_id"],
+            },
+        },
+        {
+            "name": "close_ticket",
+            "description": (
+                "Close/resolve a ticket. Optionally include a private closure note "
+                "summarizing the resolution."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "ticket_id": {
+                        "type": "integer",
+                        "description": "The ticket ID to close",
+                    },
+                    "note": {
+                        "type": "string",
+                        "description": "Optional closure/resolution note (private by default)",
+                    },
+                },
+                "required": ["ticket_id"],
+            },
+        },
+        {
+            "name": "create_ticket_note",
+            "description": (
+                "Create or update a note on a ticket. "
+                "To create a new note, provide ticket_id and note. "
+                "To update an existing note, also provide action_id. "
+                "Defaults to a private/agent-only note. "
+                "Set hiddenfromuser to false to make the note visible to the end user."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "ticket_id": {
+                        "type": "integer",
+                        "description": "The ticket ID to add the note to",
+                    },
+                    "note": {
+                        "type": "string",
+                        "description": "The note content (supports HTML)",
+                    },
+                    "hiddenfromuser": {
+                        "type": "boolean",
+                        "description": "If true, note is private/agent-only (default: true)",
+                        "default": True,
+                    },
+                    "action_id": {
+                        "type": "integer",
+                        "description": "The action ID to update. Omit to create a new note.",
+                    },
+                },
+                "required": ["ticket_id", "note"],
+            },
+        },
     ]

@@ -17,6 +17,8 @@ from proxy.message_fixer import MessageFixer
 from halo.client import HaloClient
 from halo.tools import get_halo_tools
 from agent.executor import AgentExecutor
+from mcp_server import mcp, set_halo_client
+from mcp_server.auth import MCPAuthMiddleware
 
 # Configure logging
 settings = get_settings()
@@ -31,7 +33,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan handler."""
     logger.info("Starting HaloClaude Proxy")
-    
+
     # Initialize clients
     app.state.halo_client = HaloClient(
         base_url=settings.halo_api_url,
@@ -47,9 +49,14 @@ async def lifespan(app: FastAPI):
         context_injection_enabled=settings.context_injection_enabled,
         context_cache_ttl=settings.context_cache_ttl,
     )
-    
-    yield
-    
+
+    # Set up MCP server with shared HaloClient
+    set_halo_client(app.state.halo_client)
+
+    # Run MCP session manager
+    async with mcp.session_manager.run():
+        yield
+
     # Cleanup
     await app.state.halo_client.close()
     logger.info("Shutting down HaloClaude Proxy")
@@ -61,6 +68,12 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# Add MCP authentication middleware
+app.add_middleware(MCPAuthMiddleware)
+
+# Mount MCP server at /mcp
+app.mount("/mcp", mcp.streamable_http_app())
 
 
 @app.get("/")

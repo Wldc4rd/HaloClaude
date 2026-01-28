@@ -9,6 +9,7 @@ A proxy server that enables Halo PSA to use Claude AI instead of OpenAI for tick
 - **Message Format Fixing**: Handles edge cases where Halo sends malformed requests (empty messages, conversations ending with assistant turns)
 - **Halo API Tools**: Gives Claude the ability to fetch additional context from Halo (ticket history, user info, company details, KB articles)
 - **Agentic Loop**: Automatically executes tool calls and returns results to Claude until a final response is generated
+- **MCP Server**: Exposes Halo tools via Model Context Protocol for Claude Desktop integration
 
 ## Architecture
 
@@ -113,6 +114,67 @@ See [docs/azure-deployment.md](docs/azure-deployment.md) for detailed deployment
    - View assets
    - View knowledge base articles
 
+## Claude Desktop Integration (MCP)
+
+The proxy includes an MCP (Model Context Protocol) server that allows Claude Desktop to directly access Halo PSA tools for ticket lookup, searching, and management.
+
+### Prerequisites
+
+1. Install `mcp-remote` (required because Claude Desktop doesn't natively support HTTP MCP servers):
+   ```bash
+   npm install -g mcp-remote
+   ```
+
+### Configuration
+
+Add this to your Claude Desktop config file:
+
+**Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+
+```json
+{
+  "mcpServers": {
+    "haloclaude": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://haloclaude-proxy.ashysky-0dacd66d.westus.azurecontainerapps.io/mcp/mcp",
+        "--header",
+        "Authorization: Bearer YOUR_LITELLM_MASTER_KEY"
+      ]
+    }
+  }
+}
+```
+
+For local development, use:
+```json
+{
+  "mcpServers": {
+    "haloclaude-local": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "http://localhost:4000/mcp/mcp",
+        "--allow-http",
+        "--header",
+        "Authorization: Bearer YOUR_LITELLM_MASTER_KEY"
+      ]
+    }
+  }
+}
+```
+
+### Usage
+
+After restarting Claude Desktop, you can ask Claude to:
+- "Look up ticket #12345"
+- "Search for tickets about VPN issues"
+- "Get the details for user ID 789"
+- "Find recent tickets for Acme Corp (client ID 456)"
+- "Search the knowledge base for password reset procedures"
+
 ## Automatic Context Injection
 
 When a request contains a ticket ID (e.g., "Ticket #12345" in the system prompt), the proxy automatically:
@@ -158,6 +220,10 @@ HaloClaude/
 │   ├── auth.py             # Halo OAuth token management
 │   ├── client.py           # Halo API client
 │   └── tools.py            # Tool definitions for Claude
+├── mcp_server/
+│   ├── __init__.py         # MCP package exports
+│   ├── server.py           # MCP server with tool definitions
+│   └── auth.py             # MCP authentication middleware
 ├── context/
 │   ├── parser.py           # Ticket ID extraction from prompts
 │   ├── fetcher.py          # Parallel data fetching from Halo

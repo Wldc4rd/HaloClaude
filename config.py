@@ -26,7 +26,7 @@ class Settings(BaseSettings):
 
     # Context injection
     context_injection_enabled: bool = True
-    context_cache_ttl: int = 300  # seconds
+    context_cache_ttl: int = 0  # seconds (0 = no caching, always fetch fresh)
 
     model_config = ConfigDict(
         env_file=".env",

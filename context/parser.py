@@ -11,8 +11,8 @@ logger = logging.getLogger(__name__)
 # Regex patterns for extracting ticket IDs from system prompts
 # Ordered by specificity (most specific first)
 TICKET_ID_PATTERNS = [
+    r"<Ticket ID>0*(\d+)</Ticket ID>",   # Halo XML format "<Ticket ID>0072408</Ticket ID>"
     r"Ticket\s*#\s*(\d+)",              # "Ticket #123", "Ticket # 123"
-    r"Ticket\s+(\d+)",                   # "Ticket 123"
     r"ticket[_\s]?id[:\s]+(\d+)",        # "ticket_id: 123", "ticket id: 123"
     r"\[Ticket:\s*(\d+)\]",              # "[Ticket: 123]"
     r"/tickets/(\d+)",                   # URL format "/tickets/123"

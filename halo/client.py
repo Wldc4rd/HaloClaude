@@ -117,10 +117,13 @@ class HaloClient:
             List of ticket actions
         """
         logger.debug(f"Fetching actions for ticket {ticket_id}")
-        result = await self._request("GET", f"tickets/{ticket_id}", params={
-            "includedetails": "true",
+        result = await self._request("GET", "actions", params={
+            "ticket_id": ticket_id,
         })
-        return result.get("actions", [])
+        # Halo returns {"actions": [...], "record_count": N}
+        actions = result.get("actions", [])
+        logger.info(f"Fetched {len(actions)} actions for ticket {ticket_id}")
+        return actions
     
     async def create_ticket_note(
         self,

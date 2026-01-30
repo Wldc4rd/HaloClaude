@@ -33,6 +33,7 @@ class AgentExecutor:
         sop_kb_search_term: Optional[str] = "SOP",
         max_sop_articles: int = 10,
         max_sop_article_length: int = 2000,
+        max_contract_doc_length: int = 5000,
     ):
         """
         Initialize the agent executor.
@@ -46,6 +47,7 @@ class AgentExecutor:
             sop_kb_search_term: Search term for SOP KB articles (None to disable)
             max_sop_articles: Maximum SOP articles to fetch
             max_sop_article_length: Max characters per SOP article content
+            max_contract_doc_length: Max characters of extracted PDF text per contract
         """
         self.halo_client = halo_client
         self.model = model
@@ -57,6 +59,7 @@ class AgentExecutor:
             sop_kb_search_term=sop_kb_search_term,
             max_sop_articles=max_sop_articles,
             max_sop_article_length=max_sop_article_length,
+            max_contract_doc_length=max_contract_doc_length,
         )
     
     async def run(

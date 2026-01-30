@@ -86,9 +86,31 @@ class HaloClient:
             },
         )
         response.raise_for_status()
-        
+
         return response.json()
-    
+
+    async def _request_bytes(
+        self,
+        method: str,
+        endpoint: str,
+        params: Optional[Dict[str, Any]] = None,
+    ) -> bytes:
+        """Make an authenticated request and return raw bytes."""
+        token = await self._auth.get_token()
+        client = await self.get_http_client()
+
+        url = f"{self.api_url}/{endpoint.lstrip('/')}"
+
+        response = await client.request(
+            method=method,
+            url=url,
+            params=params,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        response.raise_for_status()
+
+        return response.content
+
     # =========================================================================
     # Ticket Operations
     # =========================================================================
@@ -450,6 +472,45 @@ class HaloClient:
                 contracts = detailed
 
         return contracts
+
+    # =========================================================================
+    # Attachment Operations
+    # =========================================================================
+
+    async def get_contract_attachments(
+        self,
+        contract_id: int,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get document attachments for a contract.
+
+        Args:
+            contract_id: The contract ID
+
+        Returns:
+            List of attachment metadata dicts (id, filename, filesize, etc.)
+        """
+        logger.debug(f"Fetching attachments for contract {contract_id}")
+        result = await self._request("GET", "Attachment", params={
+            "type": 8,
+            "unique_id": contract_id,
+        })
+        attachments = result.get("attachments", [])
+        logger.info(f"Fetched {len(attachments)} attachments for contract {contract_id}")
+        return attachments
+
+    async def get_attachment_bytes(self, attachment_id: int) -> bytes:
+        """
+        Download an attachment as raw bytes.
+
+        Args:
+            attachment_id: The attachment ID
+
+        Returns:
+            Raw file bytes
+        """
+        logger.debug(f"Downloading attachment {attachment_id}")
+        return await self._request_bytes("GET", f"Attachment/{attachment_id}")
 
     # =========================================================================
     # Asset Operations

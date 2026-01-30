@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     sop_kb_search_term: Optional[str] = "SOP"  # search term to find SOP articles (None to disable)
     max_sop_articles: int = 10
     max_sop_article_length: int = 2000
+    max_contract_doc_length: int = 50000  # max characters of extracted PDF text per contract
 
     model_config = ConfigDict(
         env_file=".env",

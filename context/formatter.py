@@ -11,14 +11,20 @@ from .fetcher import ContextData
 class ContextFormatter:
     """Formats Halo context data for Claude's system prompt."""
 
-    def __init__(self, max_sop_article_length: int = 2000):
+    def __init__(
+        self,
+        max_sop_article_length: int = 2000,
+        max_contract_doc_length: int = 5000,
+    ):
         """
         Initialize the formatter.
 
         Args:
             max_sop_article_length: Max characters per SOP article content
+            max_contract_doc_length: Max characters of extracted PDF text per contract
         """
         self.max_sop_article_length = max_sop_article_length
+        self.max_contract_doc_length = max_contract_doc_length
 
     def format(self, context: ContextData) -> str:
         """
@@ -49,7 +55,9 @@ class ContextFormatter:
             sections.append(self._format_client(context.client))
 
         if context.contracts:
-            sections.append(self._format_contracts(context.contracts, context.ticket))
+            sections.append(self._format_contracts(
+                context.contracts, context.ticket, context.contract_doc_texts
+            ))
 
         if context.assets:
             sections.append(self._format_assets(context.assets))
@@ -220,6 +228,7 @@ class ContextFormatter:
         self,
         contracts: List[Dict[str, Any]],
         ticket: Optional[Dict[str, Any]] = None,
+        contract_doc_texts: Optional[Dict[int, str]] = None,
     ) -> str:
         """Format contract information."""
         lines = ["### CONTRACT INFORMATION"]
@@ -302,6 +311,14 @@ class ContextFormatter:
                 if len(note) > 300:
                     note = note[:300] + "... [truncated]"
                 lines.append(f"  - Notes: {note}")
+
+            # Contract document text (extracted from PDF)
+            contract_id = contract.get("id")
+            if contract_doc_texts and contract_id in contract_doc_texts:
+                doc_text = contract_doc_texts[contract_id]
+                if len(doc_text) > self.max_contract_doc_length:
+                    doc_text = doc_text[:self.max_contract_doc_length] + "\n... [truncated]"
+                lines.append(f"  - Agreement Document:\n{doc_text}")
 
         return "\n".join(lines)
 

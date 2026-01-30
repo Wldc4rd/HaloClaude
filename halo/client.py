@@ -414,11 +414,14 @@ class HaloClient:
         """
         Get contracts for a specific client/company.
 
+        Fetches the contract list, then fetches each contract individually
+        to get full details (prepaid hour balances are only on the detail endpoint).
+
         Args:
             client_id: The client ID
 
         Returns:
-            List of client's contracts
+            List of client's contracts with full details
         """
         logger.debug(f"Fetching contracts for client {client_id}")
         result = await self._request("GET", "ClientContract", params={
@@ -428,6 +431,24 @@ class HaloClient:
         if isinstance(contracts, dict):
             contracts = [contracts]
         logger.info(f"Fetched {len(contracts)} contracts for client {client_id}")
+
+        # Fetch full details for each contract (list endpoint omits prepaid balances)
+        if contracts:
+            import asyncio
+            detail_tasks = [
+                self._request("GET", f"ClientContract/{c['id']}")
+                for c in contracts if c.get("id")
+            ]
+            details = await asyncio.gather(*detail_tasks, return_exceptions=True)
+            detailed = []
+            for d in details:
+                if isinstance(d, Exception):
+                    logger.warning(f"Failed to fetch contract detail: {d}")
+                elif isinstance(d, dict):
+                    detailed.append(d)
+            if detailed:
+                contracts = detailed
+
         return contracts
 
     # =========================================================================

@@ -259,6 +259,11 @@ class ContextFormatter:
                 label += " (Ticket's Contract)"
             lines.append(f"\n{label}")
 
+            # Contract type
+            contract_type = contract.get("contracttype_name", "")
+            if contract_type:
+                lines.append(f"  - Type: {contract_type}")
+
             # SLA
             sla_name = contract.get("sla_name")
             if sla_name:
@@ -281,31 +286,15 @@ class ContextFormatter:
             elif not started:
                 lines.append("  - Status: Not Started")
 
-            # Prepaid hours from periods
-            periods = contract.get("periods", [])
-            current_period = None
-            for period in periods:
-                if period.get("current"):
-                    current_period = period
-                    break
-            if not current_period and periods:
-                current_period = periods[-1]
-
-            if current_period:
-                hrs_total = current_period.get("hours_in_period", 0)
-                hrs_used = current_period.get("hours_used", 0)
-                hrs_remaining = current_period.get("hours_remaining", 0)
-                if hrs_total > 0:
-                    lines.append(
-                        f"  - Prepaid Hours: {hrs_total} total, "
-                        f"{hrs_used} used, {hrs_remaining} remaining"
-                    )
-
-            # Billing indicators
-            if contract.get("allowprepay"):
-                lines.append("  - Type: Prepaid Hours Contract")
-            elif contract.get("allowpyg"):
-                lines.append("  - Type: Pay As You Go")
+            # Prepaid hours (from contract detail endpoint)
+            hrs_total = contract.get("contract_prepaytotal", 0)
+            hrs_used = contract.get("contract_prepayused", 0)
+            hrs_remaining = contract.get("contract_prepaybalance", 0)
+            if hrs_total > 0:
+                lines.append(
+                    f"  - Prepaid Hours: {hrs_total} total, "
+                    f"{hrs_used} used, {hrs_remaining} remaining"
+                )
 
             # Contract note
             note = contract.get("note", "")

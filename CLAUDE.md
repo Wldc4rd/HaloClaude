@@ -160,15 +160,20 @@ curl -X POST http://localhost:4000/openai/deployments/claude-sonnet-4-5/chat/com
 
 ## Halo API Reference
 
-A local copy of the Halo PSA OpenAPI spec is available for reference:
+Local copies of the Halo PSA OpenAPI spec are available for reference:
 
-- **Full spec**: `docs/halo-api-full.json` — Complete OpenAPI 3.0.1 spec (~4.5MB)
-- **Core spec**: `docs/halo-api-core.json` — Filtered to commonly used endpoints: Tickets, Actions, Clients, Users, Assets, KB, Agents, Contracts (~3.2MB, 36 paths)
+- **`docs/halo-api-index.md`** — START HERE. Lightweight markdown index of all endpoints with parameters and response types.
+- **`docs/halo-api-core-paths.json`** — Full path definitions for commonly used endpoints (Tickets, Actions, Clients, Users, Assets, KB, Agents, Contracts)
+- **`docs/halo-api-core-schemas.json`** — Only schemas referenced by core paths (much smaller than full spec)
+- **`docs/halo-api-full.json`** — Complete OpenAPI spec (~4.5MB, use only for edge cases)
 - **Live source**: `https://soundit.halopsa.com/api/swagger/v2/swagger.json`
 
-To refresh the local copies, run `/refresh-halo-docs` or `bash scripts/refresh-halo-docs.sh`.
+To refresh, run `/refresh-halo-docs` or `bash scripts/refresh-halo-docs.sh`.
 
-When implementing new Halo API integrations, read the relevant paths and schemas from the core spec rather than guessing endpoint shapes.
+**Workflow for new Halo API integrations:**
+1. Read `docs/halo-api-index.md` to find the endpoint and its parameters
+2. If you need full schema details, look up the schema name from the index in `docs/halo-api-core-schemas.json`
+3. If the endpoint isn't in the core set, check `docs/halo-api-full.json`
 
 ## Links
 

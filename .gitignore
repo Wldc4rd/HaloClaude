@@ -56,3 +56,7 @@ Thumbs.db
 *.pem
 *.key
 secrets/
+
+# Downloaded API docs (large, regenerated via scripts/refresh-halo-docs.sh)
+docs/halo-api-full.json
+docs/halo-api-core.json

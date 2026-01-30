@@ -30,6 +30,9 @@ class AgentExecutor:
         model: str = "claude-sonnet-4-5-20250929",
         context_injection_enabled: bool = True,
         context_cache_ttl: int = 300,
+        sop_kb_search_term: Optional[str] = "SOP",
+        max_sop_articles: int = 10,
+        max_sop_article_length: int = 2000,
     ):
         """
         Initialize the agent executor.
@@ -40,6 +43,9 @@ class AgentExecutor:
             model: Claude model to use
             context_injection_enabled: Whether to pre-fetch and inject Halo context
             context_cache_ttl: Cache time-to-live for context in seconds
+            sop_kb_search_term: Search term for SOP KB articles (None to disable)
+            max_sop_articles: Maximum SOP articles to fetch
+            max_sop_article_length: Max characters per SOP article content
         """
         self.halo_client = halo_client
         self.model = model
@@ -48,6 +54,9 @@ class AgentExecutor:
             halo_client=halo_client,
             enabled=context_injection_enabled,
             cache_ttl=context_cache_ttl,
+            sop_kb_search_term=sop_kb_search_term,
+            max_sop_articles=max_sop_articles,
+            max_sop_article_length=max_sop_article_length,
         )
     
     async def run(
@@ -225,7 +234,12 @@ class AgentExecutor:
                     count=tool_input.get("count", 10),
                     open_only=tool_input.get("open_only", False),
                 )
-            
+
+            elif tool_name == "get_client_contracts":
+                return await self.halo_client.get_client_contracts(
+                    client_id=tool_input["client_id"],
+                )
+
             elif tool_name == "get_asset":
                 return await self.halo_client.get_asset(tool_input["asset_id"])
             

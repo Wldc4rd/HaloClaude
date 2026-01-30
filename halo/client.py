@@ -407,10 +407,33 @@ class HaloClient:
         result = await self._request("GET", "tickets", params=params)
         return result.get("tickets", [])
     
+    async def get_client_contracts(
+        self,
+        client_id: int,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get contracts for a specific client/company.
+
+        Args:
+            client_id: The client ID
+
+        Returns:
+            List of client's contracts
+        """
+        logger.debug(f"Fetching contracts for client {client_id}")
+        result = await self._request("GET", "ClientContract", params={
+            "client_id": client_id,
+        })
+        contracts = result if isinstance(result, list) else result.get("contracts", result.get("items", []))
+        if isinstance(contracts, dict):
+            contracts = [contracts]
+        logger.info(f"Fetched {len(contracts)} contracts for client {client_id}")
+        return contracts
+
     # =========================================================================
     # Asset Operations
     # =========================================================================
-    
+
     async def get_asset(self, asset_id: int) -> Dict[str, Any]:
         """
         Get asset details by ID.

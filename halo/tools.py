@@ -219,6 +219,25 @@ def get_halo_tools() -> List[Dict[str, Any]]:
             },
         },
         {
+            "name": "get_client_contracts",
+            "description": (
+                "Get contracts for a client/company, including contract type, SLA, "
+                "prepaid hour balances, and billing details. "
+                "NOTE: The current ticket's client contracts have been pre-fetched "
+                "and are in the context above. Use this tool only for OTHER clients."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "client_id": {
+                        "type": "integer",
+                        "description": "The client/company ID number",
+                    }
+                },
+                "required": ["client_id"],
+            },
+        },
+        {
             "name": "create_ticket",
             "description": (
                 "Create a new ticket in Halo PSA. Requires a summary and client_id. "

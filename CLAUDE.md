@@ -158,6 +158,18 @@ curl -X POST http://localhost:4000/openai/deployments/claude-sonnet-4-5/chat/com
   -d '{"messages":[{"role":"user","content":"Hello"}]}'
 ```
 
+## Halo API Reference
+
+A local copy of the Halo PSA OpenAPI spec is available for reference:
+
+- **Full spec**: `docs/halo-api-full.json` — Complete OpenAPI 3.0.1 spec (~4.5MB)
+- **Core spec**: `docs/halo-api-core.json` — Filtered to commonly used endpoints: Tickets, Actions, Clients, Users, Assets, KB, Agents, Contracts (~3.2MB, 36 paths)
+- **Live source**: `https://soundit.halopsa.com/api/swagger/v2/swagger.json`
+
+To refresh the local copies, run `/refresh-halo-docs` or `bash scripts/refresh-halo-docs.sh`.
+
+When implementing new Halo API integrations, read the relevant paths and schemas from the core spec rather than guessing endpoint shapes.
+
 ## Links
 
 - [Halo API Documentation](https://halopsa.com/apidoc/)

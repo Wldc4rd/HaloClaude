@@ -27,6 +27,9 @@ class ContextInjector:
         halo_client: HaloClient,
         enabled: bool = True,
         cache_ttl: int = 300,
+        sop_kb_search_term: Optional[str] = "SOP",
+        max_sop_articles: int = 10,
+        max_sop_article_length: int = 2000,
     ):
         """
         Initialize the context injector.
@@ -35,14 +38,23 @@ class ContextInjector:
             halo_client: Initialized Halo API client
             enabled: Whether context injection is enabled
             cache_ttl: Cache time-to-live in seconds (default 5 minutes)
+            sop_kb_search_term: Search term for SOP KB articles (None to disable)
+            max_sop_articles: Maximum SOP articles to fetch
+            max_sop_article_length: Max characters per SOP article content
         """
         self.halo_client = halo_client
         self.enabled = enabled
         self.cache_ttl = cache_ttl
 
         self.parser = TicketIdParser()
-        self.fetcher = ContextFetcher(halo_client)
-        self.formatter = ContextFormatter()
+        self.fetcher = ContextFetcher(
+            halo_client,
+            sop_kb_search_term=sop_kb_search_term,
+            max_sop_articles=max_sop_articles,
+        )
+        self.formatter = ContextFormatter(
+            max_sop_article_length=max_sop_article_length,
+        )
 
         # Simple in-memory cache: {ticket_id: (ContextData, timestamp)}
         self._cache: Dict[int, Tuple[ContextData, float]] = {}

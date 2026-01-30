@@ -1,6 +1,7 @@
 """Configuration management using Pydantic Settings."""
 
 from functools import lru_cache
+from typing import Optional
 
 from pydantic import ConfigDict
 from pydantic_settings import BaseSettings
@@ -27,6 +28,11 @@ class Settings(BaseSettings):
     # Context injection
     context_injection_enabled: bool = True
     context_cache_ttl: int = 0  # seconds (0 = no caching, always fetch fresh)
+
+    # SOP KB article injection
+    sop_kb_search_term: Optional[str] = "SOP"  # search term to find SOP articles (None to disable)
+    max_sop_articles: int = 10
+    max_sop_article_length: int = 2000
 
     model_config = ConfigDict(
         env_file=".env",

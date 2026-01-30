@@ -20,20 +20,31 @@ class ContextData:
     user: Optional[Dict[str, Any]] = None
     client: Optional[Dict[str, Any]] = None
     assets: List[Dict[str, Any]] = field(default_factory=list)
+    contracts: List[Dict[str, Any]] = field(default_factory=list)
+    sop_articles: List[Dict[str, Any]] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
 
 
 class ContextFetcher:
     """Fetches ticket and related data from Halo API."""
 
-    def __init__(self, halo_client: HaloClient):
+    def __init__(
+        self,
+        halo_client: HaloClient,
+        sop_kb_search_term: Optional[str] = None,
+        max_sop_articles: int = 10,
+    ):
         """
         Initialize the fetcher.
 
         Args:
             halo_client: Initialized Halo API client
+            sop_kb_search_term: Search term for SOP KB articles (None to disable)
+            max_sop_articles: Maximum SOP articles to fetch
         """
         self.halo_client = halo_client
+        self.sop_kb_search_term = sop_kb_search_term
+        self.max_sop_articles = max_sop_articles
 
     async def fetch_full_context(self, ticket_id: int) -> ContextData:
         """
@@ -43,7 +54,7 @@ class ContextFetcher:
             ticket_id: The ticket ID to fetch context for
 
         Returns:
-            ContextData with ticket, actions, user, client, and assets
+            ContextData with ticket, actions, user, client, assets, contracts, SOPs
         """
         context = ContextData()
 
@@ -101,12 +112,30 @@ class ContextFetcher:
             ))
             task_labels.append("client")
 
+            # Fetch contracts for this client
+            tasks.append(self._safe_fetch(
+                self.halo_client.get_client_contracts(client_id),
+                f"contracts for client {client_id}"
+            ))
+            task_labels.append("contracts")
+
         for asset_id in asset_ids:
             tasks.append(self._safe_fetch(
                 self.halo_client.get_asset(asset_id),
                 f"asset {asset_id}"
             ))
             task_labels.append(f"asset_{asset_id}")
+
+        # Fetch SOP KB articles if configured
+        if self.sop_kb_search_term:
+            tasks.append(self._safe_fetch(
+                self.halo_client.search_kb(
+                    self.sop_kb_search_term,
+                    count=self.max_sop_articles,
+                ),
+                "SOP KB articles"
+            ))
+            task_labels.append("sop_articles")
 
         if tasks:
             results = await asyncio.gather(*tasks)
@@ -119,6 +148,10 @@ class ContextFetcher:
                         context.user = result
                     elif label == "client":
                         context.client = result
+                    elif label == "contracts":
+                        context.contracts = result if isinstance(result, list) else []
+                    elif label == "sop_articles":
+                        context.sop_articles = result if isinstance(result, list) else []
                     elif label.startswith("asset_"):
                         context.assets.append(result)
 

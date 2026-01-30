@@ -3,13 +3,22 @@ Context Formatter - Formats fetched data for injection into system prompts.
 """
 
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from .fetcher import ContextData
 
 
 class ContextFormatter:
     """Formats Halo context data for Claude's system prompt."""
+
+    def __init__(self, max_sop_article_length: int = 2000):
+        """
+        Initialize the formatter.
+
+        Args:
+            max_sop_article_length: Max characters per SOP article content
+        """
+        self.max_sop_article_length = max_sop_article_length
 
     def format(self, context: ContextData) -> str:
         """
@@ -39,8 +48,14 @@ class ContextFormatter:
         if context.client:
             sections.append(self._format_client(context.client))
 
+        if context.contracts:
+            sections.append(self._format_contracts(context.contracts, context.ticket))
+
         if context.assets:
             sections.append(self._format_assets(context.assets))
+
+        if context.sop_articles:
+            sections.append(self._format_sop_articles(context.sop_articles))
 
         if context.errors:
             sections.append(self._format_errors(context.errors))
@@ -198,6 +213,137 @@ class ContextFormatter:
             if len(notes) > 500:
                 notes = notes[:500] + "... [truncated]"
             lines.append(f"- Notes: {notes}")
+
+        return "\n".join(lines)
+
+    def _format_contracts(
+        self,
+        contracts: List[Dict[str, Any]],
+        ticket: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """Format contract information."""
+        lines = ["### CONTRACT INFORMATION"]
+
+        if not contracts:
+            lines.append("No contracts found for this client.")
+            return "\n".join(lines)
+
+        # Get ticket's contract ID for highlighting
+        ticket_contract_id = None
+        if ticket:
+            ticket_contract_id = ticket.get("contract_id")
+            if isinstance(ticket_contract_id, dict):
+                ticket_contract_id = ticket_contract_id.get("id")
+
+        # Filter to active contracts (plus the ticket's contract even if expired)
+        active_contracts = [
+            c for c in contracts
+            if not c.get("expired", False) or c.get("id") == ticket_contract_id
+        ]
+
+        if not active_contracts:
+            lines.append("No active contracts.")
+            return "\n".join(lines)
+
+        # Sort: ticket's contract first
+        active_contracts.sort(
+            key=lambda c: (c.get("id") != ticket_contract_id, c.get("ref", ""))
+        )
+
+        for contract in active_contracts:
+            is_ticket_contract = contract.get("id") == ticket_contract_id
+            ref = contract.get("ref", f"Contract {contract.get('id', '?')}")
+
+            label = f"**{ref}**"
+            if is_ticket_contract:
+                label += " (Ticket's Contract)"
+            lines.append(f"\n{label}")
+
+            # SLA
+            sla_name = contract.get("sla_name")
+            if sla_name:
+                lines.append(f"  - SLA: {sla_name}")
+
+            # Dates
+            start = contract.get("start_date", "")
+            end = contract.get("end_date", "")
+            if start or end:
+                date_str = f"{start[:10] if start else '?'} to {end[:10] if end else 'ongoing'}"
+                lines.append(f"  - Period: {date_str}")
+
+            # Status
+            started = contract.get("started", False)
+            expired = contract.get("expired", False)
+            if started and not expired:
+                lines.append("  - Status: Active")
+            elif expired:
+                lines.append("  - Status: Expired")
+            elif not started:
+                lines.append("  - Status: Not Started")
+
+            # Prepaid hours from periods
+            periods = contract.get("periods", [])
+            current_period = None
+            for period in periods:
+                if period.get("current"):
+                    current_period = period
+                    break
+            if not current_period and periods:
+                current_period = periods[-1]
+
+            if current_period:
+                hrs_total = current_period.get("hours_in_period", 0)
+                hrs_used = current_period.get("hours_used", 0)
+                hrs_remaining = current_period.get("hours_remaining", 0)
+                if hrs_total > 0:
+                    lines.append(
+                        f"  - Prepaid Hours: {hrs_total} total, "
+                        f"{hrs_used} used, {hrs_remaining} remaining"
+                    )
+
+            # Billing indicators
+            if contract.get("allowprepay"):
+                lines.append("  - Type: Prepaid Hours Contract")
+            elif contract.get("allowpyg"):
+                lines.append("  - Type: Pay As You Go")
+
+            # Contract note
+            note = contract.get("note", "")
+            if note:
+                if len(note) > 300:
+                    note = note[:300] + "... [truncated]"
+                lines.append(f"  - Notes: {note}")
+
+        return "\n".join(lines)
+
+    def _format_sop_articles(self, articles: List[Dict[str, Any]]) -> str:
+        """Format SOP KB articles for injection."""
+        lines = ["### STANDARD OPERATING PROCEDURES"]
+        lines.append("The following business process guidelines apply:")
+
+        for i, article in enumerate(articles, 1):
+            title = article.get("name", article.get("title", f"Article {i}"))
+
+            lines.append(f"\n**{title}**")
+
+            # Get article content — try multiple field names
+            content = (
+                article.get("resolution")
+                or article.get("description")
+                or article.get("resolution_html")
+                or article.get("description_html")
+                or ""
+            )
+
+            # Strip HTML if present
+            if content and "<" in content:
+                content = re.sub(r"<[^>]+>", " ", content)
+                content = re.sub(r"\s+", " ", content).strip()
+
+            if content:
+                if len(content) > self.max_sop_article_length:
+                    content = content[:self.max_sop_article_length] + "... [truncated]"
+                lines.append(f"  {content}")
 
         return "\n".join(lines)
 

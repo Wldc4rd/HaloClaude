@@ -48,6 +48,9 @@ async def lifespan(app: FastAPI):
         model=settings.anthropic_model,
         context_injection_enabled=settings.context_injection_enabled,
         context_cache_ttl=settings.context_cache_ttl,
+        sop_kb_search_term=settings.sop_kb_search_term,
+        max_sop_articles=settings.max_sop_articles,
+        max_sop_article_length=settings.max_sop_article_length,
     )
 
     # Set up MCP server with shared HaloClient

@@ -41,6 +41,14 @@ class ContextFormatter:
         sections.append("=" * 60)
         sections.append("ADDITIONAL CONTEXT FROM HALO (Pre-fetched)")
         sections.append("=" * 60)
+        sections.append(
+            "IMPORTANT: This context is provided as background reference only. "
+            "You MUST follow the instructions in the system prompt above. "
+            "If the system prompt asks for a structured report, analysis, summary, "
+            "or any specific format, produce exactly that — do NOT write an email "
+            "or client communication unless the system prompt specifically asks for one. "
+            "The SOPs below are guidelines for when you ARE writing client-facing responses."
+        )
 
         if context.ticket:
             sections.append(self._format_ticket(context.ticket))
@@ -325,7 +333,7 @@ class ContextFormatter:
     def _format_sop_articles(self, articles: List[Dict[str, Any]]) -> str:
         """Format SOP KB articles for injection."""
         lines = ["### STANDARD OPERATING PROCEDURES"]
-        lines.append("The following business process guidelines apply:")
+        lines.append("The following business process guidelines apply when writing client-facing responses:")
 
         for i, article in enumerate(articles, 1):
             title = article.get("name", article.get("title", f"Article {i}"))

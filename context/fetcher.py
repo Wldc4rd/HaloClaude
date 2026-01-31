@@ -40,6 +40,7 @@ class ContextFetcher:
         halo_client: HaloClient,
         sop_kb_search_term: Optional[str] = None,
         max_sop_articles: int = 10,
+        sop_kb_filter_tag: Optional[str] = None,
     ):
         """
         Initialize the fetcher.
@@ -48,10 +49,12 @@ class ContextFetcher:
             halo_client: Initialized Halo API client
             sop_kb_search_term: Search term for SOP KB articles (None to disable)
             max_sop_articles: Maximum SOP articles to fetch
+            sop_kb_filter_tag: Only inject articles whose kb_tags contain this tag (None to inject all matches)
         """
         self.halo_client = halo_client
         self.sop_kb_search_term = sop_kb_search_term
         self.max_sop_articles = max_sop_articles
+        self.sop_kb_filter_tag = sop_kb_filter_tag
 
     async def fetch_full_context(self, ticket_id: int) -> ContextData:
         """
@@ -196,8 +199,23 @@ class ContextFetcher:
             elif result:
                 detailed.append(result)
 
+        if not detailed:
+            return search_results
+
+        # Filter by tag if configured
+        if self.sop_kb_filter_tag:
+            filtered = [
+                a for a in detailed
+                if self.sop_kb_filter_tag.lower() in (a.get("kb_tags", "") or "").lower()
+            ]
+            logger.info(
+                f"Fetched {len(detailed)} SOP articles, "
+                f"{len(filtered)} matched tag '{self.sop_kb_filter_tag}'"
+            )
+            return filtered
+
         logger.info(f"Fetched {len(detailed)} SOP article details")
-        return detailed if detailed else search_results
+        return detailed
 
     async def _fetch_contract_docs(
         self,

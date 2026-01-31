@@ -49,6 +49,7 @@ async def lifespan(app: FastAPI):
         context_injection_enabled=settings.context_injection_enabled,
         context_cache_ttl=settings.context_cache_ttl,
         sop_kb_search_term=settings.sop_kb_search_term,
+        sop_kb_filter_tag=settings.sop_kb_filter_tag,
         max_sop_articles=settings.max_sop_articles,
         max_sop_article_length=settings.max_sop_article_length,
         max_contract_doc_length=settings.max_contract_doc_length,

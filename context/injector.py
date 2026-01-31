@@ -28,6 +28,7 @@ class ContextInjector:
         enabled: bool = True,
         cache_ttl: int = 300,
         sop_kb_search_term: Optional[str] = "SOP",
+        sop_kb_filter_tag: Optional[str] = "ai-context",
         max_sop_articles: int = 10,
         max_sop_article_length: int = 2000,
         max_contract_doc_length: int = 5000,
@@ -53,6 +54,7 @@ class ContextInjector:
             halo_client,
             sop_kb_search_term=sop_kb_search_term,
             max_sop_articles=max_sop_articles,
+            sop_kb_filter_tag=sop_kb_filter_tag,
         )
         self.formatter = ContextFormatter(
             max_sop_article_length=max_sop_article_length,

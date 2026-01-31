@@ -31,6 +31,7 @@ class Settings(BaseSettings):
 
     # SOP KB article injection
     sop_kb_search_term: Optional[str] = "SOP"  # search term to find SOP articles (None to disable)
+    sop_kb_filter_tag: Optional[str] = "ai-context"  # only inject articles with this tag (None = all matches)
     max_sop_articles: int = 10
     max_sop_article_length: int = 2000
     max_contract_doc_length: int = 50000  # max characters of extracted PDF text per contract

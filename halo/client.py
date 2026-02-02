@@ -339,6 +339,29 @@ class HaloClient:
         result = await self._request("GET", "tickets", params=params)
         return result.get("tickets", [])
     
+    async def get_related_tickets(self, ticket_id: int) -> List[Dict[str, Any]]:
+        """
+        Get tickets related/linked to a given ticket.
+
+        Args:
+            ticket_id: The ticket ID to find related tickets for
+
+        Returns:
+            List of related ticket summaries
+        """
+        logger.info(f"Fetching related tickets for ticket {ticket_id}")
+        result = await self._request("GET", "tickets", params={
+            "related_id": ticket_id,
+            "count": 20,
+        })
+        tickets = result.get("tickets", [])
+        logger.info(
+            f"Related tickets for {ticket_id}: "
+            f"{[t.get('id') for t in tickets]} "
+            f"(record_count={result.get('record_count', '?')})"
+        )
+        return tickets
+
     # =========================================================================
     # User Operations
     # =========================================================================

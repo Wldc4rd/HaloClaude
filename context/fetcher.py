@@ -98,8 +98,7 @@ class ContextFetcher:
             context.errors.append(error_msg)
             return context  # Can't proceed without ticket
 
-        # Step 2: Extract related tickets and IDs
-        context.related_tickets = self._extract_related_tickets(context.ticket)
+        # Step 2: Extract related IDs
         user_id = self._extract_user_id(context.ticket)
         client_id = self._extract_client_id(context.ticket)
         asset_ids = self._extract_asset_ids(context.ticket)
@@ -138,6 +137,13 @@ class ContextFetcher:
             ))
             task_labels.append(f"asset_{asset_id}")
 
+        # Fetch related/linked tickets
+        tasks.append(self._safe_fetch(
+            self.halo_client.get_related_tickets(ticket_id),
+            f"related tickets for ticket {ticket_id}"
+        ))
+        task_labels.append("related_tickets")
+
         # Fetch SOP KB articles if configured
         if self.sop_kb_search_term:
             tasks.append(self._safe_fetch(
@@ -161,6 +167,8 @@ class ContextFetcher:
                         context.contracts = result if isinstance(result, list) else []
                     elif label == "sop_articles":
                         context.sop_articles = result if isinstance(result, list) else []
+                    elif label == "related_tickets":
+                        context.related_tickets = result if isinstance(result, list) else []
                     elif label.startswith("asset_"):
                         context.assets.append(result)
 
@@ -385,25 +393,3 @@ class ContextFetcher:
 
         return unique_ids
 
-    def _extract_related_tickets(self, ticket: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Extract related ticket info from ticket data."""
-        related = ticket.get("related_tickets", [])
-        if not isinstance(related, list):
-            return []
-
-        extracted = []
-        for rt in related:
-            if not isinstance(rt, dict):
-                continue
-            tid = rt.get("id")
-            if not tid:
-                continue
-            status = rt.get("status_name", rt.get("status", ""))
-            if isinstance(status, dict):
-                status = status.get("name", "")
-            extracted.append({
-                "id": tid,
-                "summary": rt.get("summary", ""),
-                "status": status or "",
-            })
-        return extracted

@@ -133,8 +133,12 @@ class ContextFormatter:
         for rt in related:
             tid = rt.get("id", "?")
             summary = rt.get("summary", "No summary")
-            status = rt.get("status", "")
+
+            status = rt.get("status_name", rt.get("status", ""))
+            if isinstance(status, dict):
+                status = status.get("name", "")
             status_str = f" (Status: {status})" if status else ""
+
             lines.append(f"- Ticket #{tid}: {summary}{status_str}")
 
         return "\n".join(lines)

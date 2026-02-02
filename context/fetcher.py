@@ -23,6 +23,7 @@ class ContextData:
     """Container for all fetched Halo context."""
     ticket: Optional[Dict[str, Any]] = None
     actions: List[Dict[str, Any]] = field(default_factory=list)  # Ticket history/notes
+    related_tickets: List[Dict[str, Any]] = field(default_factory=list)
     user: Optional[Dict[str, Any]] = None
     client: Optional[Dict[str, Any]] = None
     assets: List[Dict[str, Any]] = field(default_factory=list)
@@ -97,7 +98,8 @@ class ContextFetcher:
             context.errors.append(error_msg)
             return context  # Can't proceed without ticket
 
-        # Step 2: Extract related IDs
+        # Step 2: Extract related tickets and IDs
+        context.related_tickets = self._extract_related_tickets(context.ticket)
         user_id = self._extract_user_id(context.ticket)
         client_id = self._extract_client_id(context.ticket)
         asset_ids = self._extract_asset_ids(context.ticket)
@@ -382,3 +384,26 @@ class ContextFetcher:
                 unique_ids.append(aid)
 
         return unique_ids
+
+    def _extract_related_tickets(self, ticket: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Extract related ticket info from ticket data."""
+        related = ticket.get("related_tickets", [])
+        if not isinstance(related, list):
+            return []
+
+        extracted = []
+        for rt in related:
+            if not isinstance(rt, dict):
+                continue
+            tid = rt.get("id")
+            if not tid:
+                continue
+            status = rt.get("status_name", rt.get("status", ""))
+            if isinstance(status, dict):
+                status = status.get("name", "")
+            extracted.append({
+                "id": tid,
+                "summary": rt.get("summary", ""),
+                "status": status or "",
+            })
+        return extracted

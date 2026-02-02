@@ -53,6 +53,9 @@ class ContextFormatter:
         if context.ticket:
             sections.append(self._format_ticket(context.ticket))
 
+        if context.related_tickets:
+            sections.append(self._format_related_tickets(context.related_tickets))
+
         if context.actions:
             sections.append(self._format_actions(context.actions))
 
@@ -119,6 +122,20 @@ class ContextFormatter:
             if len(details) > 1000:
                 details = details[:1000] + "... [truncated]"
             lines.append(f"- Details: {details}")
+
+        return "\n".join(lines)
+
+    def _format_related_tickets(self, related: List[Dict[str, Any]]) -> str:
+        """Format related/linked tickets."""
+        lines = ["### RELATED TICKETS"]
+        lines.append("The following tickets are linked to this ticket. Use the get_ticket tool to view full details.")
+
+        for rt in related:
+            tid = rt.get("id", "?")
+            summary = rt.get("summary", "No summary")
+            status = rt.get("status", "")
+            status_str = f" (Status: {status})" if status else ""
+            lines.append(f"- Ticket #{tid}: {summary}{status_str}")
 
         return "\n".join(lines)
 

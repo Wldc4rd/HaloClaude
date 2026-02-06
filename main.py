@@ -6,7 +6,7 @@ summaries, and AI-powered features with intelligent tool calling.
 """
 
 import logging
-from fastapi import FastAPI, Request, HTTPException, Header
+from fastapi import BackgroundTasks, FastAPI, Request, HTTPException, Header
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 import anthropic
@@ -187,6 +187,68 @@ async def chat_completions(
                 }
             }
         )
+
+
+@app.post("/webhook/triage", status_code=202)
+async def webhook_triage(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    api_key: str = Header(alias="api-key"),
+):
+    """
+    Trigger the triage pipeline for a ticket.
+
+    Called by Halo runbooks (button clicks or scheduled).
+    Runs asynchronously and writes results back to Halo.
+    """
+    if api_key != settings.litellm_master_key:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    if not settings.triage_enabled:
+        raise HTTPException(status_code=503, detail="Triage pipeline is disabled")
+
+    body = await request.json()
+    ticket_id = body.get("ticket_id")
+
+    if not ticket_id:
+        raise HTTPException(status_code=400, detail="ticket_id is required")
+
+    try:
+        ticket_id = int(ticket_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="ticket_id must be an integer")
+
+    logger.info(f"Triage webhook received for ticket {ticket_id}")
+
+    background_tasks.add_task(
+        _run_triage_background,
+        ticket_id=ticket_id,
+        app=request.app,
+    )
+
+    return {"status": "accepted", "ticket_id": ticket_id}
+
+
+async def _run_triage_background(ticket_id: int, app: FastAPI):
+    """Background task wrapper for the triage pipeline."""
+    from triage import run_triage_pipeline
+
+    try:
+        result = await run_triage_pipeline(
+            ticket_id=ticket_id,
+            halo_client=app.state.halo_client,
+            ninja_client=app.state.ninja_client,
+            anthropic_api_key=settings.anthropic_api_key,
+            model=settings.triage_model,
+            sop_kb_search_term=settings.sop_kb_search_term,
+            sop_kb_filter_tag=settings.sop_kb_filter_tag,
+            max_sop_articles=settings.max_sop_articles,
+            max_sop_article_length=settings.max_sop_article_length,
+            max_contract_doc_length=settings.max_contract_doc_length,
+        )
+        logger.info(f"Triage pipeline complete for ticket {ticket_id}: {result}")
+    except Exception as e:
+        logger.exception(f"Triage pipeline failed for ticket {ticket_id}: {e}")
 
 
 if __name__ == "__main__":

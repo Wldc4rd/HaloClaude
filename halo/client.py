@@ -85,6 +85,11 @@ class HaloClient:
                 "Content-Type": "application/json",
             },
         )
+        if response.status_code >= 400:
+            body = response.text
+            logger.error(
+                f"Halo API error: {response.status_code} {method} {endpoint} - {body[:500]}"
+            )
         response.raise_for_status()
 
         return response.json()
@@ -237,6 +242,7 @@ class HaloClient:
         agent_id: Optional[int] = None,
         team_id: Optional[int] = None,
         status_id: Optional[int] = None,
+        asset_id: Optional[int] = None,
     ) -> Any:
         """
         Update an existing ticket.
@@ -276,6 +282,8 @@ class HaloClient:
             ticket["team_id"] = team_id
         if status_id is not None:
             ticket["status_id"] = status_id
+        if asset_id is not None:
+            ticket["asset_id"] = asset_id
         return await self._request("POST", "tickets", json=[ticket])
 
     async def close_ticket(
@@ -497,6 +505,68 @@ class HaloClient:
         return contracts
 
     # =========================================================================
+    # Opportunity Operations
+    # =========================================================================
+
+    async def create_opportunity(
+        self,
+        summary: str,
+        client_id: int,
+        details: Optional[str] = None,
+        agent_id: Optional[int] = None,
+    ) -> Any:
+        """
+        Create a new opportunity in Halo.
+
+        Args:
+            summary: Opportunity summary/subject
+            client_id: Client/company ID
+            details: Opportunity description
+            agent_id: Assigned agent ID
+
+        Returns:
+            Created opportunity details
+        """
+        from datetime import datetime, timezone
+
+        logger.info(f"Creating opportunity: {summary}")
+        opp: Dict[str, Any] = {
+            "summary": summary,
+            "client_id": client_id,
+            "dateoccurred": datetime.now(timezone.utc).isoformat(),
+        }
+        if details is not None:
+            opp["details"] = details
+        if agent_id is not None:
+            opp["agent_id"] = agent_id
+        return await self._request("POST", "Opportunities", json=[opp])
+
+    # =========================================================================
+    # Contract Operations
+    # =========================================================================
+
+    async def update_contract(
+        self,
+        contract_id: int,
+        note: Optional[str] = None,
+    ) -> Any:
+        """
+        Update a contract's fields.
+
+        Args:
+            contract_id: The contract ID to update
+            note: New note text for the contract
+
+        Returns:
+            Updated contract details
+        """
+        logger.info(f"Updating contract {contract_id}")
+        contract: Dict[str, Any] = {"id": contract_id}
+        if note is not None:
+            contract["note"] = note
+        return await self._request("POST", f"ClientContract", json=[contract])
+
+    # =========================================================================
     # Attachment Operations
     # =========================================================================
 
@@ -551,7 +621,69 @@ class HaloClient:
         """
         logger.debug(f"Fetching asset {asset_id}")
         return await self._request("GET", f"asset/{asset_id}")
-    
+
+    async def link_asset_to_ticket(
+        self,
+        ticket_id: int,
+        asset_id: int,
+    ) -> Any:
+        """
+        Link an asset to a ticket via the assets array.
+
+        Args:
+            ticket_id: The ticket to link the asset to
+            asset_id: The asset ID to link
+
+        Returns:
+            Updated ticket details
+        """
+        logger.info(f"Linking asset {asset_id} to ticket {ticket_id}")
+        return await self._request(
+            "POST", "tickets",
+            json=[{"id": ticket_id, "assets": [{"id": asset_id}]}],
+        )
+
+    async def search_assets(
+        self,
+        client_id: Optional[int] = None,
+        user_id: Optional[int] = None,
+        search: Optional[str] = None,
+        count: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """
+        Search/list assets with filters.
+
+        Args:
+            client_id: Filter by client/company ID
+            user_id: Filter by user ID (assets assigned to this user)
+            search: Text search filter
+            count: Maximum results to return
+
+        Returns:
+            List of matching assets
+        """
+        params: Dict[str, Any] = {
+            "count": count,
+            "activeinactive": "true,false",  # active only
+        }
+        if client_id is not None:
+            params["client_id"] = client_id
+        if user_id is not None:
+            params["user_id"] = user_id
+        if search:
+            params["search"] = search
+
+        result = await self._request("GET", "Asset", params=params)
+        # Halo may return {"assets": [...]} or a list directly
+        if isinstance(result, dict):
+            assets = result.get("assets", [])
+        elif isinstance(result, list):
+            assets = result
+        else:
+            assets = []
+        logger.info(f"Asset search returned {len(assets)} results")
+        return assets
+
     # =========================================================================
     # Knowledge Base Operations
     # =========================================================================

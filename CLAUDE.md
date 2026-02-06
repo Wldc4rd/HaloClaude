@@ -104,6 +104,8 @@ Key endpoints we'll use:
 - `ninja/auth.py` - NinjaRMM OAuth2 token management
 - `ninja/tools.py` - Claude tool definitions for NinjaRMM
 - `ninja/mcp_tools.py` - MCP tool registrations for NinjaRMM (Claude Desktop)
+- `triage/pipeline.py` - Multi-stage ticket triage pipeline
+- `triage/prompts.py` - System prompt templates for triage stages
 
 ## Environment Variables
 
@@ -120,6 +122,10 @@ NINJA_ENABLED=true                # Enable NinjaRMM integration
 NINJA_API_URL=https://app.ninjarmm.com  # NinjaRMM instance URL (US region default)
 NINJA_CLIENT_ID=xxx               # NinjaRMM OAuth client ID
 NINJA_CLIENT_SECRET=xxx           # NinjaRMM OAuth client secret
+
+# Triage pipeline
+TRIAGE_ENABLED=true               # Enable triage webhook endpoint
+TRIAGE_MODEL=claude-opus-4-6      # Model for triage (defaults to Opus)
 ```
 
 ## Deployment
@@ -157,6 +163,25 @@ The wrapper sets `REQUESTS_CA_BUNDLE` and `SSL_CERT_FILE` environment variables 
 3. Add the handler in `agent/executor.py`
 4. Test with a mock response
 5. Document in README.md
+
+### Triage Pipeline
+
+The triage pipeline (`POST /webhook/triage`) runs a multi-stage AI analysis on new tickets:
+
+1. **Triage**: Classifies client type (managed/break-fix/none), checks contract status and prepaid balance
+2. **Contract Enrichment**: If contract notes are empty, generates a summary
+3. **Sales Path**: If no contract or prepaid time, creates an Opportunity in Halo
+4. **Technical Path**: Assigns to correct technician (Charlie or Justin based on client), runs full analysis with tools, writes private note
+
+**Trigger**: POST to `/webhook/triage` with `{"ticket_id": 12345}` and `api-key` header. Returns 202 immediately, runs in background.
+
+**Testing locally**:
+```bash
+curl -X POST http://localhost:4000/webhook/triage \
+  -H "Content-Type: application/json" \
+  -H "api-key: your-master-key" \
+  -d '{"ticket_id": 12345}'
+```
 
 ### Debugging Issues
 

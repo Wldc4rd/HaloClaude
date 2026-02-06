@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     max_sop_article_length: int = 2000
     max_contract_doc_length: int = 0  # max characters of extracted PDF text per contract (0 = disabled)
 
+    # Triage pipeline
+    triage_enabled: bool = True
+    triage_model: str = "claude-opus-4-6"
+
     # NinjaRMM / NinjaOne
     ninja_enabled: bool = False
     ninja_api_url: str = "https://app.ninjarmm.com"

@@ -32,6 +32,7 @@ class ContextInjector:
         max_sop_articles: int = 10,
         max_sop_article_length: int = 2000,
         max_contract_doc_length: int = 5000,
+        ninja_client=None,
     ):
         """
         Initialize the context injector.
@@ -44,6 +45,7 @@ class ContextInjector:
             max_sop_articles: Maximum SOP articles to fetch
             max_sop_article_length: Max characters per SOP article content
             max_contract_doc_length: Max characters of extracted PDF text per contract
+            ninja_client: Optional NinjaRMM client for live device data
         """
         self.halo_client = halo_client
         self.enabled = enabled
@@ -56,6 +58,7 @@ class ContextInjector:
             max_sop_articles=max_sop_articles,
             sop_kb_filter_tag=sop_kb_filter_tag,
             max_contract_doc_length=max_contract_doc_length,
+            ninja_client=ninja_client,
         )
         self.formatter = ContextFormatter(
             max_sop_article_length=max_sop_article_length,

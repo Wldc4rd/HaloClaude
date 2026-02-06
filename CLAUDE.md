@@ -29,9 +29,18 @@ Custom FastAPI proxy deployed on Azure Container Apps:
 1. Receives Azure OpenAI format requests from Halo PSA
 2. Fixes message format issues (empty content, assistant endings)
 3. Translates to Claude API format
-4. Injects Halo API tool definitions (9 tools for tickets, users, KB, etc.)
-5. Executes agentic tool loop until Claude provides final response
-6. Translates response back to Azure OpenAI format
+4. Injects Halo API tool definitions + NinjaRMM tools (when enabled)
+5. Context injection: fetches ticket data, assets, contracts, SOPs, and live NinjaRMM device data
+6. Executes agentic tool loop until Claude provides final response
+7. Translates response back to Azure OpenAI format
+
+### NinjaRMM Integration
+
+When `NINJA_ENABLED=true`, the system:
+- **Auto-injects** live device data (status, volumes, alerts, patches) when a ticket's linked asset has a `ninjarmm_id` field
+- **Provides 10 on-demand tools** (prefixed `ninja_`) for Claude to query additional device data (software, CPU, network, services, etc.)
+- **Exposes MCP tools** on the same `/mcp` endpoint for use with Claude Desktop
+- Uses OAuth2 Client Credentials flow for NinjaRMM API authentication
 
 ## Halo PSA Context
 
@@ -91,6 +100,10 @@ Key endpoints we'll use:
 - `halo/client.py` - Halo API client with OAuth token management
 - `halo/tools.py` - Claude tool definitions for Halo resources
 - `agent/executor.py` - Runs the agentic loop (Claude → tools → Claude → ...)
+- `ninja/client.py` - NinjaRMM API client for device data
+- `ninja/auth.py` - NinjaRMM OAuth2 token management
+- `ninja/tools.py` - Claude tool definitions for NinjaRMM
+- `ninja/mcp_tools.py` - MCP tool registrations for NinjaRMM (Claude Desktop)
 
 ## Environment Variables
 
@@ -101,6 +114,12 @@ HALO_CLIENT_ID=xxx                # Halo API app client ID
 HALO_CLIENT_SECRET=xxx            # Halo API app client secret
 LITELLM_MASTER_KEY=xxx            # Proxy authentication key
 LOG_LEVEL=INFO                    # Logging level
+
+# NinjaRMM (optional)
+NINJA_ENABLED=true                # Enable NinjaRMM integration
+NINJA_API_URL=https://app.ninjarmm.com  # NinjaRMM instance URL (US region default)
+NINJA_CLIENT_ID=xxx               # NinjaRMM OAuth client ID
+NINJA_CLIENT_SECRET=xxx           # NinjaRMM OAuth client secret
 ```
 
 ## Deployment

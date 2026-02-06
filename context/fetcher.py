@@ -5,11 +5,14 @@ Context Fetcher - Fetches related data from Halo API.
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 import fitz  # PyMuPDF
 
 from halo.client import HaloClient
+
+if TYPE_CHECKING:
+    from ninja.client import NinjaClient
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +33,7 @@ class ContextData:
     contracts: List[Dict[str, Any]] = field(default_factory=list)
     contract_doc_texts: Dict[int, str] = field(default_factory=dict)  # contract_id -> PDF text
     sop_articles: List[Dict[str, Any]] = field(default_factory=list)
+    ninja_devices: Dict[int, Dict[str, Any]] = field(default_factory=dict)  # ninja_device_id -> aggregated data
     errors: List[str] = field(default_factory=list)
 
 
@@ -43,6 +47,7 @@ class ContextFetcher:
         max_sop_articles: int = 10,
         sop_kb_filter_tag: Optional[str] = None,
         max_contract_doc_length: int = 0,
+        ninja_client: Optional["NinjaClient"] = None,
     ):
         """
         Initialize the fetcher.
@@ -53,12 +58,14 @@ class ContextFetcher:
             max_sop_articles: Maximum SOP articles to fetch
             sop_kb_filter_tag: Only inject articles whose kb_tags contain this tag (None to inject all matches)
             max_contract_doc_length: Max chars for contract PDF extraction (0 = disabled)
+            ninja_client: Optional NinjaRMM client for fetching live device data
         """
         self.halo_client = halo_client
         self.sop_kb_search_term = sop_kb_search_term
         self.max_sop_articles = max_sop_articles
         self.sop_kb_filter_tag = sop_kb_filter_tag
         self.max_contract_doc_length = max_contract_doc_length
+        self.ninja_client = ninja_client
 
     async def fetch_full_context(self, ticket_id: int) -> ContextData:
         """
@@ -178,6 +185,10 @@ class ContextFetcher:
         # Step 4: Fetch contract document PDFs (if enabled)
         if context.contracts and self.max_contract_doc_length > 0:
             context.contract_doc_texts = await self._fetch_contract_docs(context.contracts)
+
+        # Step 5: Fetch NinjaRMM device data for linked assets
+        if self.ninja_client and context.assets:
+            context.ninja_devices = await self._fetch_ninja_devices(context.assets)
 
         return context
 
@@ -310,6 +321,89 @@ class ContextFetcher:
                     logger.warning(f"Failed to extract PDF text from attachment {attach_id}: {e}")
 
         return doc_texts
+
+    async def _fetch_ninja_devices(
+        self,
+        assets: List[Dict[str, Any]],
+    ) -> Dict[int, Dict[str, Any]]:
+        """
+        Fetch live device data from NinjaRMM for assets that have a ninjarmm_id.
+
+        For each device, fetches basic info, volumes, alerts, and OS patches
+        in parallel to build a comprehensive device snapshot.
+
+        Args:
+            assets: List of Halo asset dicts
+
+        Returns:
+            Dict mapping ninja_device_id -> aggregated device data
+        """
+        ninja_devices: Dict[int, Dict[str, Any]] = {}
+
+        # Extract NinjaRMM device IDs from assets
+        device_ids = []
+        for asset in assets:
+            ninja_id = asset.get("ninjarmm_id")
+            if ninja_id and isinstance(ninja_id, int):
+                device_ids.append(ninja_id)
+
+        if not device_ids:
+            logger.debug("No assets with ninjarmm_id found")
+            return ninja_devices
+
+        logger.info(f"Fetching NinjaRMM data for {len(device_ids)} device(s): {device_ids}")
+
+        for device_id in device_ids:
+            try:
+                # Fetch device info, volumes, alerts, and patches in parallel
+                device_task = self._safe_fetch(
+                    self.ninja_client.get_device(device_id),
+                    f"NinjaRMM device {device_id}"
+                )
+                volumes_task = self._safe_fetch(
+                    self.ninja_client.get_device_volumes(device_id),
+                    f"NinjaRMM volumes for device {device_id}"
+                )
+                alerts_task = self._safe_fetch(
+                    self.ninja_client.get_device_alerts(device_id),
+                    f"NinjaRMM alerts for device {device_id}"
+                )
+                patches_task = self._safe_fetch(
+                    self.ninja_client.get_device_os_patches(device_id),
+                    f"NinjaRMM patches for device {device_id}"
+                )
+
+                results = await asyncio.gather(
+                    device_task, volumes_task, alerts_task, patches_task
+                )
+
+                device_data, device_err = results[0]
+                volumes_data, volumes_err = results[1]
+                alerts_data, alerts_err = results[2]
+                patches_data, patches_err = results[3]
+
+                if device_err:
+                    logger.warning(f"Skipping NinjaRMM device {device_id}: {device_err}")
+                    continue
+
+                ninja_devices[device_id] = {
+                    "device": device_data,
+                    "volumes": volumes_data if not volumes_err else [],
+                    "alerts": alerts_data if not alerts_err else [],
+                    "os_patches": patches_data if not patches_err else [],
+                }
+
+                logger.info(
+                    f"NinjaRMM device {device_id}: "
+                    f"{len(ninja_devices[device_id]['volumes'])} volumes, "
+                    f"{len(ninja_devices[device_id]['alerts'])} alerts, "
+                    f"{len(ninja_devices[device_id]['os_patches'])} patches"
+                )
+
+            except Exception as e:
+                logger.warning(f"Failed to fetch NinjaRMM device {device_id}: {e}")
+
+        return ninja_devices
 
     @staticmethod
     def _extract_pdf_text(pdf_bytes: bytes) -> str:

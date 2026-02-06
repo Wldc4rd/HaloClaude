@@ -36,6 +36,13 @@ class Settings(BaseSettings):
     max_sop_article_length: int = 2000
     max_contract_doc_length: int = 0  # max characters of extracted PDF text per contract (0 = disabled)
 
+    # NinjaRMM / NinjaOne
+    ninja_enabled: bool = False
+    ninja_api_url: str = "https://app.ninjarmm.com"
+    ninja_client_id: Optional[str] = None
+    ninja_client_secret: Optional[str] = None
+    ninja_scope: str = "monitoring"
+
     model_config = ConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

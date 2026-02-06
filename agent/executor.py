@@ -7,12 +7,15 @@ until Claude provides a final response.
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 import anthropic
 
 from halo.client import HaloClient
 from context.injector import ContextInjector
+
+if TYPE_CHECKING:
+    from ninja.client import NinjaClient
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +38,7 @@ class AgentExecutor:
         max_sop_articles: int = 10,
         max_sop_article_length: int = 2000,
         max_contract_doc_length: int = 5000,
+        ninja_client: Optional["NinjaClient"] = None,
     ):
         """
         Initialize the agent executor.
@@ -49,8 +53,10 @@ class AgentExecutor:
             max_sop_articles: Maximum SOP articles to fetch
             max_sop_article_length: Max characters per SOP article content
             max_contract_doc_length: Max characters of extracted PDF text per contract
+            ninja_client: Optional NinjaRMM client for device data tools
         """
         self.halo_client = halo_client
+        self.ninja_client = ninja_client
         self.model = model
         self.client = anthropic.AsyncAnthropic(api_key=anthropic_api_key)
         self.context_injector = ContextInjector(
@@ -62,6 +68,7 @@ class AgentExecutor:
             max_sop_articles=max_sop_articles,
             max_sop_article_length=max_sop_article_length,
             max_contract_doc_length=max_contract_doc_length,
+            ninja_client=ninja_client,
         )
     
     async def run(
@@ -305,9 +312,60 @@ class AgentExecutor:
                     action_id=tool_input.get("action_id"),
                 )
 
+            # NinjaRMM tools
+            elif tool_name == "ninja_get_device":
+                if not self.ninja_client:
+                    return {"error": "NinjaRMM integration is not enabled"}
+                return await self.ninja_client.get_device(tool_input["device_id"])
+
+            elif tool_name == "ninja_get_device_volumes":
+                if not self.ninja_client:
+                    return {"error": "NinjaRMM integration is not enabled"}
+                return await self.ninja_client.get_device_volumes(tool_input["device_id"])
+
+            elif tool_name == "ninja_get_device_alerts":
+                if not self.ninja_client:
+                    return {"error": "NinjaRMM integration is not enabled"}
+                return await self.ninja_client.get_device_alerts(tool_input["device_id"])
+
+            elif tool_name == "ninja_get_device_os_patches":
+                if not self.ninja_client:
+                    return {"error": "NinjaRMM integration is not enabled"}
+                return await self.ninja_client.get_device_os_patches(tool_input["device_id"])
+
+            elif tool_name == "ninja_get_device_software":
+                if not self.ninja_client:
+                    return {"error": "NinjaRMM integration is not enabled"}
+                return await self.ninja_client.get_device_software(tool_input["device_id"])
+
+            elif tool_name == "ninja_get_device_processors":
+                if not self.ninja_client:
+                    return {"error": "NinjaRMM integration is not enabled"}
+                return await self.ninja_client.get_device_processors(tool_input["device_id"])
+
+            elif tool_name == "ninja_get_device_last_user":
+                if not self.ninja_client:
+                    return {"error": "NinjaRMM integration is not enabled"}
+                return await self.ninja_client.get_device_last_user(tool_input["device_id"])
+
+            elif tool_name == "ninja_get_device_disk_drives":
+                if not self.ninja_client:
+                    return {"error": "NinjaRMM integration is not enabled"}
+                return await self.ninja_client.get_device_disk_drives(tool_input["device_id"])
+
+            elif tool_name == "ninja_get_device_network_interfaces":
+                if not self.ninja_client:
+                    return {"error": "NinjaRMM integration is not enabled"}
+                return await self.ninja_client.get_device_network_interfaces(tool_input["device_id"])
+
+            elif tool_name == "ninja_get_device_windows_services":
+                if not self.ninja_client:
+                    return {"error": "NinjaRMM integration is not enabled"}
+                return await self.ninja_client.get_device_windows_services(tool_input["device_id"])
+
             else:
                 return {"error": f"Unknown tool: {tool_name}"}
-                
+
         except Exception as e:
             logger.exception(f"Error executing tool {tool_name}: {e}")
             return {"error": str(e)}

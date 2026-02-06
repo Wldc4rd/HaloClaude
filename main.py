@@ -40,6 +40,20 @@ async def lifespan(app: FastAPI):
         client_id=settings.halo_client_id,
         client_secret=settings.halo_client_secret,
     )
+
+    # Initialize NinjaRMM client if enabled
+    app.state.ninja_client = None
+    if settings.ninja_enabled:
+        from ninja import NinjaClient, set_ninja_client
+        app.state.ninja_client = NinjaClient(
+            base_url=settings.ninja_api_url,
+            client_id=settings.ninja_client_id,
+            client_secret=settings.ninja_client_secret,
+            scope=settings.ninja_scope,
+        )
+        set_ninja_client(app.state.ninja_client)
+        logger.info("NinjaRMM integration enabled")
+
     app.state.translator = AzureOpenAITranslator()
     app.state.message_fixer = MessageFixer()
     app.state.agent_executor = AgentExecutor(
@@ -53,6 +67,7 @@ async def lifespan(app: FastAPI):
         max_sop_articles=settings.max_sop_articles,
         max_sop_article_length=settings.max_sop_article_length,
         max_contract_doc_length=settings.max_contract_doc_length,
+        ninja_client=app.state.ninja_client,
     )
 
     # Set up MCP server with shared HaloClient
@@ -63,6 +78,8 @@ async def lifespan(app: FastAPI):
         yield
 
     # Cleanup
+    if app.state.ninja_client:
+        await app.state.ninja_client.close()
     await app.state.halo_client.close()
     logger.info("Shutting down HaloClaude Proxy")
 
@@ -114,8 +131,11 @@ async def chat_completions(
         # Fix any message format issues
         messages = request.app.state.message_fixer.fix_messages(messages)
         
-        # Get Halo tools
+        # Get tools
         tools = get_halo_tools()
+        if request.app.state.ninja_client:
+            from ninja import get_ninja_tools
+            tools = tools + get_ninja_tools()
         
         # Execute agent loop (handles tool calls)
         response = await request.app.state.agent_executor.run(

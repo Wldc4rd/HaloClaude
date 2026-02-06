@@ -74,6 +74,9 @@ class ContextFormatter:
         if context.assets:
             sections.append(self._format_assets(context.assets))
 
+        if context.ninja_devices:
+            sections.append(self._format_ninja_devices(context.ninja_devices))
+
         if context.related_tickets:
             sections.append(self._format_related_tickets(context.related_tickets))
 
@@ -524,6 +527,82 @@ class ContextFormatter:
 
             if asset.get("ipaddress"):
                 lines.append(f"  - IP Address: {asset['ipaddress']}")
+
+        return "\n".join(lines)
+
+    def _format_ninja_devices(self, ninja_devices: Dict[int, Dict[str, Any]]) -> str:
+        """Format live NinjaRMM device data."""
+        lines = ["### LIVE DEVICE DATA (from NinjaRMM)"]
+        lines.append("Real-time device monitoring data from NinjaRMM:")
+
+        for device_id, data in ninja_devices.items():
+            device = data.get("device", {})
+            volumes = data.get("volumes", [])
+            alerts = data.get("alerts", [])
+            os_patches = data.get("os_patches", [])
+
+            # Device name and basic info
+            system_name = device.get("systemName", device.get("dnsName", f"Device {device_id}"))
+            lines.append(f"\n**Device: {system_name}** (NinjaRMM ID: {device_id})")
+
+            # Online/offline status
+            offline = device.get("offline")
+            if offline is not None:
+                status = "Offline" if offline else "Online"
+                lines.append(f"  - Status: {status}")
+
+            last_contact = device.get("lastContact")
+            if last_contact:
+                lines.append(f"  - Last Contact: {last_contact}")
+
+            # OS info
+            os_info = device.get("os", {})
+            if isinstance(os_info, dict):
+                os_name = os_info.get("name", "")
+                if os_name:
+                    lines.append(f"  - OS: {os_name}")
+            elif isinstance(os_info, str) and os_info:
+                lines.append(f"  - OS: {os_info}")
+
+            # Node class / device type
+            node_class = device.get("nodeClass", "")
+            if node_class:
+                lines.append(f"  - Type: {node_class}")
+
+            # IP addresses
+            ip_addrs = device.get("ipAddresses", [])
+            if ip_addrs:
+                lines.append(f"  - IP Addresses: {', '.join(str(ip) for ip in ip_addrs)}")
+
+            # Disk volumes
+            if volumes:
+                lines.append("  - Disk Volumes:")
+                for vol in volumes:
+                    name = vol.get("name", vol.get("letter", "?"))
+                    capacity = vol.get("capacity", 0)
+                    free = vol.get("freeSpace", 0)
+                    if capacity > 0:
+                        capacity_gb = capacity / (1024 ** 3)
+                        free_gb = free / (1024 ** 3)
+                        pct_free = (free / capacity) * 100
+                        lines.append(
+                            f"    - {name}: {free_gb:.1f} GB free / {capacity_gb:.1f} GB total "
+                            f"({pct_free:.0f}% free)"
+                        )
+
+            # Active alerts
+            if alerts:
+                lines.append(f"  - Active Alerts ({len(alerts)}):")
+                for alert in alerts[:5]:  # Limit to 5 alerts
+                    severity = alert.get("severity", "UNKNOWN")
+                    message = alert.get("message", alert.get("subject", "No description"))
+                    lines.append(f"    - [{severity}] {message}")
+                if len(alerts) > 5:
+                    lines.append(f"    - ... and {len(alerts) - 5} more")
+
+            # Pending patches
+            if os_patches:
+                lines.append(f"  - Pending OS Patches: {len(os_patches)}")
 
         return "\n".join(lines)
 

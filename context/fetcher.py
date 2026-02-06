@@ -42,6 +42,7 @@ class ContextFetcher:
         sop_kb_search_term: Optional[str] = None,
         max_sop_articles: int = 10,
         sop_kb_filter_tag: Optional[str] = None,
+        max_contract_doc_length: int = 0,
     ):
         """
         Initialize the fetcher.
@@ -51,11 +52,13 @@ class ContextFetcher:
             sop_kb_search_term: Search term for SOP KB articles (None to disable)
             max_sop_articles: Maximum SOP articles to fetch
             sop_kb_filter_tag: Only inject articles whose kb_tags contain this tag (None to inject all matches)
+            max_contract_doc_length: Max chars for contract PDF extraction (0 = disabled)
         """
         self.halo_client = halo_client
         self.sop_kb_search_term = sop_kb_search_term
         self.max_sop_articles = max_sop_articles
         self.sop_kb_filter_tag = sop_kb_filter_tag
+        self.max_contract_doc_length = max_contract_doc_length
 
     async def fetch_full_context(self, ticket_id: int) -> ContextData:
         """
@@ -172,8 +175,8 @@ class ContextFetcher:
                     elif label.startswith("asset_"):
                         context.assets.append(result)
 
-        # Step 4: Fetch contract document PDFs
-        if context.contracts:
+        # Step 4: Fetch contract document PDFs (if enabled)
+        if context.contracts and self.max_contract_doc_length > 0:
             context.contract_doc_texts = await self._fetch_contract_docs(context.contracts)
 
         return context

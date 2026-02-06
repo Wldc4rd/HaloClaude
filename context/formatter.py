@@ -2,10 +2,13 @@
 Context Formatter - Formats fetched data for injection into system prompts.
 """
 
+import logging
 import re
 from typing import Any, Dict, List, Optional
 
 from .fetcher import ContextData
+
+logger = logging.getLogger(__name__)
 
 
 class ContextFormatter:
@@ -47,17 +50,15 @@ class ContextFormatter:
             "If the system prompt asks for a structured report, analysis, summary, "
             "or any specific format, produce exactly that — do NOT write an email "
             "or client communication unless the system prompt specifically asks for one. "
-            "The SOPs below are guidelines for when you ARE writing client-facing responses."
+            "The SOPs below are guidelines for when you ARE writing client-facing responses.\n\n"
+            "**CRITICAL: When writing emails or responses, you MUST reference and incorporate "
+            "the TICKET HISTORY below. This contains the actual conversation and work done on this ticket. "
+            "Your response should directly relate to and build upon the recent actions and notes.**"
         )
 
+        # Order: background info first, then ticket history last (Claude pays more attention to recent context)
         if context.ticket:
             sections.append(self._format_ticket(context.ticket))
-
-        if context.related_tickets:
-            sections.append(self._format_related_tickets(context.related_tickets))
-
-        if context.actions:
-            sections.append(self._format_actions(context.actions))
 
         if context.user:
             sections.append(self._format_user(context.user))
@@ -73,15 +74,67 @@ class ContextFormatter:
         if context.assets:
             sections.append(self._format_assets(context.assets))
 
+        if context.related_tickets:
+            sections.append(self._format_related_tickets(context.related_tickets))
+
         if context.sop_articles:
             sections.append(self._format_sop_articles(context.sop_articles))
 
         if context.errors:
             sections.append(self._format_errors(context.errors))
 
+        # TICKET HISTORY LAST - most important for email generation
+        if context.actions:
+            sections.append(self._format_actions(context.actions))
+            # Add a final reminder about recent work
+            sections.append(self._format_recent_work_reminder(context.actions))
+
         sections.append("=" * 60)
 
         return "\n\n".join(sections)
+
+    def _format_recent_work_reminder(self, actions: List[Dict[str, Any]]) -> str:
+        """
+        Add a prominent reminder about recent work done on the ticket.
+        This helps Claude understand it should update the customer about completed work.
+        """
+        if not actions:
+            return ""
+
+        # Get the most recent action with note content
+        sorted_actions = sorted(
+            actions,
+            key=lambda a: a.get("datetime", a.get("dateoccurred", a.get("date", ""))),
+            reverse=True
+        )
+
+        recent_work = []
+        for action in sorted_actions[:3]:  # Check top 3 most recent
+            note = action.get("note", "")
+            if note and len(note) > 50:  # Has substantial content
+                who = action.get("who", "Unknown")
+                outcome = action.get("outcome", "Note")
+                if isinstance(outcome, dict):
+                    outcome = outcome.get("name", "Note")
+                # Get first 200 chars as summary
+                summary = note[:200].replace("\n", " ")
+                if len(note) > 200:
+                    summary += "..."
+                recent_work.append(f"- [{outcome}] by {who}: {summary}")
+
+        if not recent_work:
+            return ""
+
+        lines = [
+            "### ⚠️ IMPORTANT: RECENT WORK ON THIS TICKET",
+            "**If you are writing a reply to the customer, you MUST inform them about the work described above.**",
+            "**Do NOT just respond to their original question - update them on what has been done.**",
+            "",
+            "Most recent work:",
+        ]
+        lines.extend(recent_work)
+
+        return "\n".join(lines)
 
     def _format_ticket(self, ticket: Dict[str, Any]) -> str:
         """Format ticket details."""
@@ -145,16 +198,40 @@ class ContextFormatter:
 
     def _format_actions(self, actions: List[Dict[str, Any]]) -> str:
         """Format ticket history/actions."""
-        lines = ["### TICKET HISTORY"]
+        lines = [
+            "### TICKET HISTORY (IMPORTANT - USE THIS FOR EMAIL CONTEXT)",
+            "**The following is the actual conversation and work history for this ticket. "
+            "Reference this when writing responses:**"
+        ]
 
         if not actions:
             lines.append("No actions recorded.")
             return "\n".join(lines)
 
+        # Debug: log sample of first action to see available fields
+        if actions:
+            sample = actions[0]
+            logger.info(f"Sample action fields: {list(sample.keys())[:15]}...")  # First 15 fields
+            logger.info(
+                f"Sample action: datetime={sample.get('datetime')}, "
+                f"who={sample.get('who')}, outcome={sample.get('outcome')}, "
+                f"note_len={len(sample.get('note', '') or '')}"
+            )
+            # Count actions by type to see distribution
+            private_count = sum(1 for a in actions if a.get("hiddenfromuser"))
+            public_count = len(actions) - private_count
+            has_note = sum(1 for a in actions if a.get("note"))
+            has_emailbody = sum(1 for a in actions if a.get("emailbody"))
+            logger.info(
+                f"Action breakdown: {len(actions)} total, {private_count} private, {public_count} public, "
+                f"{has_note} with note, {has_emailbody} with emailbody"
+            )
+
         # Sort by date (newest first) and limit to recent actions
+        # Halo uses 'datetime' field for actions
         sorted_actions = sorted(
             actions,
-            key=lambda a: a.get("dateoccurred", a.get("date", "")),
+            key=lambda a: a.get("datetime", a.get("dateoccurred", a.get("date", ""))),
             reverse=True
         )
 
@@ -163,6 +240,11 @@ class ContextFormatter:
         if len(sorted_actions) > max_actions:
             lines.append(f"(Showing {max_actions} most recent of {len(sorted_actions)} actions)")
             sorted_actions = sorted_actions[:max_actions]
+
+        # Debug: count actions with actual note content
+        actions_with_notes = sum(1 for a in sorted_actions if a.get("note"))
+        actions_with_emailbody = sum(1 for a in sorted_actions if a.get("emailbody"))
+        logger.info(f"Formatting {len(sorted_actions)} actions: {actions_with_notes} with note, {actions_with_emailbody} with emailbody")
 
         for action in sorted_actions:
             action_id = action.get("id", "")
@@ -175,24 +257,47 @@ class ContextFormatter:
             if isinstance(who, dict):
                 who = who.get("name", "Unknown")
 
-            # Get the date
-            date = action.get("dateoccurred", action.get("date", "Unknown date"))
+            # Get the date - Halo uses 'datetime' for actions
+            date = action.get("datetime", action.get("dateoccurred", action.get("date", "Unknown date")))
 
-            # Get the note/content
-            note = action.get("note", action.get("details", action.get("description", "")))
+            # Get the note/content - check multiple fields
+            # Email actions use emailbody/emailbody_html, notes use note/note_html
+            note = (
+                action.get("note")
+                or action.get("emailbody")
+                or action.get("note_html")
+                or action.get("emailbody_html")
+                or action.get("details")
+                or action.get("description")
+                or ""
+            )
+
+            # Get email subject if present
+            email_subject = action.get("emailsubject", "")
+
             # Strip HTML if present
             if note and "<" in note:
                 note = re.sub(r"<[^>]+>", " ", note)
                 note = re.sub(r"\s+", " ", note).strip()
+
             # Truncate long notes
             if note and len(note) > 500:
                 note = note[:500] + "... [truncated]"
 
             lines.append(f"\n**[{date}] {action_type}** by {who}")
+            if email_subject:
+                lines.append(f"  Subject: {email_subject}")
             if note:
                 lines.append(f"  {note}")
 
-        return "\n".join(lines)
+        # Log a sample of formatted output
+        result = "\n".join(lines)
+        if len(result) > 500:
+            logger.info(f"Formatted TICKET HISTORY section ({len(result)} chars). First 500: {result[:500]}")
+        else:
+            logger.info(f"Formatted TICKET HISTORY section: {result}")
+
+        return result
 
     def _format_user(self, user: Dict[str, Any]) -> str:
         """Format user information."""

@@ -55,6 +55,7 @@ class ContextInjector:
             sop_kb_search_term=sop_kb_search_term,
             max_sop_articles=max_sop_articles,
             sop_kb_filter_tag=sop_kb_filter_tag,
+            max_contract_doc_length=max_contract_doc_length,
         )
         self.formatter = ContextFormatter(
             max_sop_article_length=max_sop_article_length,

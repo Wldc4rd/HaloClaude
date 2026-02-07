@@ -54,6 +54,17 @@ async def lifespan(app: FastAPI):
         set_ninja_client(app.state.ninja_client)
         logger.info("NinjaRMM integration enabled")
 
+    # Initialize Mesh Email Security client if enabled
+    app.state.mesh_client = None
+    if settings.mesh_enabled:
+        from mesh import MeshClient, set_mesh_client
+        app.state.mesh_client = MeshClient(
+            base_url=settings.mesh_api_url,
+            api_key=settings.mesh_api_key,
+        )
+        set_mesh_client(app.state.mesh_client)
+        logger.info("Mesh Email Security integration enabled")
+
     app.state.translator = AzureOpenAITranslator()
     app.state.message_fixer = MessageFixer()
     app.state.agent_executor = AgentExecutor(
@@ -68,6 +79,7 @@ async def lifespan(app: FastAPI):
         max_sop_article_length=settings.max_sop_article_length,
         max_contract_doc_length=settings.max_contract_doc_length,
         ninja_client=app.state.ninja_client,
+        mesh_client=app.state.mesh_client,
     )
 
     # Set up MCP server with shared HaloClient
@@ -78,6 +90,8 @@ async def lifespan(app: FastAPI):
         yield
 
     # Cleanup
+    if app.state.mesh_client:
+        await app.state.mesh_client.close()
     if app.state.ninja_client:
         await app.state.ninja_client.close()
     await app.state.halo_client.close()
@@ -136,6 +150,9 @@ async def chat_completions(
         if request.app.state.ninja_client:
             from ninja import get_ninja_tools
             tools = tools + get_ninja_tools()
+        if request.app.state.mesh_client:
+            from mesh import get_mesh_tools
+            tools = tools + get_mesh_tools()
         
         # Execute agent loop (handles tool calls)
         response = await request.app.state.agent_executor.run(

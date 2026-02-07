@@ -42,6 +42,15 @@ When `NINJA_ENABLED=true`, the system:
 - **Exposes MCP tools** on the same `/mcp` endpoint for use with Claude Desktop
 - Uses OAuth2 Client Credentials flow for NinjaRMM API authentication
 
+### Mesh Email Security Integration
+
+When `MESH_ENABLED=true`, the system:
+- **Provides 3 on-demand tools** (prefixed `mesh_`) for Claude to search email logs, get email event traces, and look up customers
+- **Exposes MCP tools** on the same `/mcp` endpoint for use with Claude Desktop
+- Uses static API key authentication (no OAuth)
+- API reference: `docs/mesh-api-index.md`
+- OpenAPI spec (partial): `docs/Mesh-API-v1.json`
+
 ## Halo PSA Context
 
 ### What Halo Sends
@@ -104,6 +113,9 @@ Key endpoints we'll use:
 - `ninja/auth.py` - NinjaRMM OAuth2 token management
 - `ninja/tools.py` - Claude tool definitions for NinjaRMM
 - `ninja/mcp_tools.py` - MCP tool registrations for NinjaRMM (Claude Desktop)
+- `mesh/client.py` - Mesh Email Security API client
+- `mesh/tools.py` - Claude tool definitions for Mesh
+- `mesh/mcp_tools.py` - MCP tool registrations for Mesh (Claude Desktop)
 - `triage/pipeline.py` - Multi-stage ticket triage pipeline
 - `triage/prompts.py` - System prompt templates for triage stages
 
@@ -122,6 +134,11 @@ NINJA_ENABLED=true                # Enable NinjaRMM integration
 NINJA_API_URL=https://app.ninjarmm.com  # NinjaRMM instance URL (US region default)
 NINJA_CLIENT_ID=xxx               # NinjaRMM OAuth client ID
 NINJA_CLIENT_SECRET=xxx           # NinjaRMM OAuth client secret
+
+# Mesh Email Security (optional)
+MESH_ENABLED=true                 # Enable Mesh integration
+MESH_API_URL=https://hub-us.emailsecurity.app  # Mesh API URL
+MESH_API_KEY=xxx                  # Mesh API key
 
 # Triage pipeline
 TRIAGE_ENABLED=true               # Enable triage webhook endpoint

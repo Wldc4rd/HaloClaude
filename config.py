@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     ninja_client_secret: Optional[str] = None
     ninja_scope: str = "monitoring"
 
+    # Mesh Email Security
+    mesh_enabled: bool = False
+    mesh_api_url: str = "https://hub-us.emailsecurity.app"
+    mesh_api_key: Optional[str] = None
+
     model_config = ConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

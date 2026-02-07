@@ -16,6 +16,7 @@ from context.injector import ContextInjector
 
 if TYPE_CHECKING:
     from ninja.client import NinjaClient
+    from mesh.client import MeshClient
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,7 @@ class AgentExecutor:
         max_sop_article_length: int = 2000,
         max_contract_doc_length: int = 5000,
         ninja_client: Optional["NinjaClient"] = None,
+        mesh_client: Optional["MeshClient"] = None,
     ):
         """
         Initialize the agent executor.
@@ -54,9 +56,11 @@ class AgentExecutor:
             max_sop_article_length: Max characters per SOP article content
             max_contract_doc_length: Max characters of extracted PDF text per contract
             ninja_client: Optional NinjaRMM client for device data tools
+            mesh_client: Optional Mesh Email Security client for email log tools
         """
         self.halo_client = halo_client
         self.ninja_client = ninja_client
+        self.mesh_client = mesh_client
         self.model = model
         self.client = anthropic.AsyncAnthropic(api_key=anthropic_api_key)
         self.context_injector = ContextInjector(
@@ -362,6 +366,36 @@ class AgentExecutor:
                 if not self.ninja_client:
                     return {"error": "NinjaRMM integration is not enabled"}
                 return await self.ninja_client.get_device_windows_services(tool_input["device_id"])
+
+            # Mesh Email Security tools
+            elif tool_name == "mesh_search_email_logs":
+                if not self.mesh_client:
+                    return {"error": "Mesh Email Security integration is not enabled"}
+                return await self.mesh_client.search_email_logs(
+                    direction=tool_input.get("direction", "inbound"),
+                    from_addr=tool_input.get("from_addr"),
+                    to_addr=tool_input.get("to_addr"),
+                    subject=tool_input.get("subject"),
+                    status=tool_input.get("status"),
+                    verdict=tool_input.get("verdict"),
+                    start=tool_input.get("start"),
+                    end=tool_input.get("end"),
+                    sender_ip=tool_input.get("sender_ip"),
+                    message_id=tool_input.get("message_id"),
+                    size=tool_input.get("size", 50),
+                )
+
+            elif tool_name == "mesh_get_email_events":
+                if not self.mesh_client:
+                    return {"error": "Mesh Email Security integration is not enabled"}
+                return await self.mesh_client.get_email_log_events(tool_input["queue_id"])
+
+            elif tool_name == "mesh_search_customers":
+                if not self.mesh_client:
+                    return {"error": "Mesh Email Security integration is not enabled"}
+                return await self.mesh_client.search_customers(
+                    filter_term=tool_input["filter_term"],
+                )
 
             else:
                 return {"error": f"Unknown tool: {tool_name}"}

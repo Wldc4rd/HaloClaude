@@ -133,12 +133,15 @@ Multiple documents may be provided (e.g. a proposal and a signed contract). Extr
 details from ALL of them, including appendices.
 
 IMPORTANT: Contract documents often contain tables of optional services with checkboxes. \
-Only list a service as INCLUDED if it is clearly checked/selected (e.g. ☑, ✓, [x], or \
-similar). Items with empty/unchecked boxes (☐, [ ], or no mark) are NOT included — list \
-them under exclusions or omit them. If the selection state is ambiguous, note it as unclear. \
-Cross-check your selections against any subtotal or total amount in the contract — the \
-prices of the services you identify as included should add up to the documented total. \
-If they don't match, re-examine which options are actually selected.
+Only list a service as INCLUDED if it is clearly checked/selected (e.g. ☑, ✓, [x], \
+filled radio button ◉, or similar). Items with empty/unchecked boxes (☐, [ ], ○, or \
+no mark) are NOT included. PDF text extraction often fails to capture checkbox states \
+reliably, so you MUST use the subtotal/total as the definitive source of truth: \
+add up the prices of the services you believe are selected — if the sum does not \
+match the documented subtotal, remove items until it does. The subtotal is always \
+correct; do not rationalize a mismatch by treating unmatched items as "separate \
+billing items" or similar. An item whose price causes the total to exceed the \
+subtotal is NOT selected.
 
 If existing notes are provided, incorporate any manually-entered information from them \
 (e.g. custom notes, annotations, or details not found in the contract documents) into \

@@ -126,13 +126,12 @@ async def run_triage_pipeline(
     # ========================================
     # STAGE 2b: Contract Enrichment (if needed)
     # ========================================
-    # Determine which contracts need notes by inspecting the actual data
-    # (don't rely on Claude's assessment — it's unreliable for this check)
-    contracts_needing_notes = _find_contracts_needing_notes(context.contracts)
-    if contracts_needing_notes:
+    # Check all active contracts — Stage 2b will evaluate note quality
+    contracts_to_check = _find_active_contracts(context.contracts)
+    if contracts_to_check:
         try:
             await _stage2b_enrich_contracts(
-                client, model, halo_client, context, contracts_needing_notes
+                client, model, halo_client, context, contracts_to_check
             )
             result["stages_completed"].append("contract_enrichment")
         except Exception as e:
@@ -251,13 +250,12 @@ async def _stage1_triage(
     # Determine route based on decision logic (Python, not Claude)
     if not triage.has_active_contract:
         triage.route = "sales"
-    elif triage.client_type == "break_fix" and not triage.has_prepaid_time:
-        triage.route = "sales"
-    elif triage.client_type == "managed_services" and not triage.has_prepaid_time:
-        if not triage.work_covered_by_managed:
-            triage.route = "sales"
-        else:
+    elif not triage.has_prepaid_time:
+        # No prepaid time — check if the work is covered by a service we provide
+        if triage.work_covered_by_managed:
             triage.route = "technical"
+        else:
+            triage.route = "sales"
     else:
         triage.route = "technical"
 
@@ -430,52 +428,99 @@ async def _stage2b_enrich_contracts(
                 logger.debug(f"No attachments for contract {cid}")
                 continue
 
-            # Find first PDF attachment
-            pdf_attach = None
-            for att in attachments:
-                if att.get("filename", "").lower().endswith(".pdf"):
-                    pdf_attach = att
-                    break
-            if not pdf_attach:
-                pdf_attach = attachments[0]
+            # Read ALL PDF attachments (proposal, contract, etc.)
+            from context.fetcher import ContextFetcher
+            all_texts = []
+            pdf_attachments = [
+                att for att in attachments
+                if att.get("filename", "").lower().endswith(".pdf")
+            ]
+            if not pdf_attachments:
+                pdf_attachments = attachments[:1]
 
-            pdf_bytes = await halo_client.get_attachment_bytes(pdf_attach["id"])
-            if pdf_bytes:
-                from context.fetcher import ContextFetcher
-                text = ContextFetcher._extract_pdf_text(pdf_bytes)
-                if text:
-                    contract_doc_texts[cid] = text
-                    logger.info(
-                        f"Extracted {len(text)} chars from contract {cid} PDF "
-                        f"for enrichment"
+            for pdf_attach in pdf_attachments:
+                try:
+                    pdf_bytes = await halo_client.get_attachment_bytes(pdf_attach["id"])
+                    if pdf_bytes:
+                        text = ContextFetcher._extract_pdf_text(pdf_bytes)
+                        if text:
+                            filename = pdf_attach.get("filename", "unknown")
+                            all_texts.append(f"--- {filename} ---\n{text}")
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to fetch attachment {pdf_attach.get('id')} "
+                        f"for contract {cid}: {e}"
                     )
-        except Exception as e:
-            logger.warning(f"Failed to fetch PDF for contract {cid}: {e}")
 
-    # Generate and save summaries
+            if all_texts:
+                combined = "\n\n".join(all_texts)
+                contract_doc_texts[cid] = combined
+                logger.info(
+                    f"Extracted {len(combined)} chars from {len(all_texts)} "
+                    f"PDF(s) for contract {cid}"
+                )
+        except Exception as e:
+            logger.warning(f"Failed to fetch PDFs for contract {cid}: {e}")
+
+    # Evaluate and generate/regenerate summaries
     for contract in contracts_to_enrich:
         cid = contract.get("id")
         if not cid:
             continue
 
-        contract_text = _format_contract_for_summary(
-            contract, contract_doc_texts.get(cid, "")
-        )
+        existing_note = str(contract.get("note") or contract.get("Notes") or "").strip()
+        doc_text = contract_doc_texts.get(cid, "")
+
+        # Skip contracts with no source documents AND no existing notes to improve
+        if not doc_text and not existing_note:
+            logger.debug(f"Contract {cid}: no documents and no existing notes, skipping")
+            continue
+
+        # If there are existing notes but no documents to compare against,
+        # there's nothing to improve — keep what's there
+        if not doc_text and existing_note:
+            logger.debug(f"Contract {cid}: has notes but no documents, skipping")
+            continue
+
+        contract_text = _format_contract_for_summary(contract, doc_text)
+
+        # Ask Claude to evaluate and generate/regenerate
+        if existing_note:
+            user_content = (
+                f"Review the existing notes for this contract and determine if they "
+                f"are a comprehensive summary. If the existing notes are incomplete, "
+                f"missing key details from the contract documents, or appear to be "
+                f"auto-generated with insufficient information, generate an improved "
+                f"summary. Incorporate any manually-entered notes or details that "
+                f"appear in the existing notes.\n\n"
+                f"If the existing notes are already comprehensive, respond with "
+                f"exactly: NOTES_ADEQUATE\n\n"
+                f"EXISTING NOTES:\n{existing_note}\n\n"
+                f"CONTRACT DATA:\n{contract_text}"
+            )
+        else:
+            user_content = (
+                f"Generate a concise summary for this contract:\n\n{contract_text}"
+            )
 
         response = await client.messages.create(
             model=model,
-            max_tokens=1024,
+            max_tokens=2048,
             system=CONTRACT_SUMMARY_PROMPT,
-            messages=[{
-                "role": "user",
-                "content": f"Generate a concise summary for this contract:\n\n{contract_text}",
-            }],
+            messages=[{"role": "user", "content": user_content}],
         )
 
         summary = response.content[0].text.strip()
 
+        if summary == "NOTES_ADEQUATE":
+            logger.info(f"Contract {cid} (ref={contract.get('ref')}): notes are adequate")
+            continue
+
         await halo_client.update_contract(contract_id=cid, note=summary)
-        logger.info(f"Updated contract {cid} notes with AI-generated summary")
+        logger.info(
+            f"Updated contract {cid} (ref={contract.get('ref')}) notes "
+            f"({'regenerated' if existing_note else 'generated'})"
+        )
 
 
 async def _stage3_technical_triage(
@@ -602,15 +647,15 @@ def _block_to_dict(block) -> Dict[str, Any]:
     return {"type": block.type}
 
 
-def _find_contracts_needing_notes(contracts: List[Dict[str, Any]]) -> List[int]:
+def _find_active_contracts(contracts: List[Dict[str, Any]]) -> List[int]:
     """
-    Check which active contracts have empty or very sparse notes.
+    Return IDs of all active contracts (started and not expired).
 
-    Returns list of contract IDs that need AI-generated summaries.
+    Every active contract is a candidate for enrichment; Stage 2b will
+    evaluate whether the existing notes are adequate.
     """
     ids = []
     for c in contracts:
-        # Only enrich active contracts (started and not expired)
         started = c.get("started", False)
         expired = c.get("expired", False)
         if not started or expired:
@@ -620,14 +665,7 @@ def _find_contracts_needing_notes(contracts: List[Dict[str, Any]]) -> List[int]:
         if not cid:
             continue
 
-        note = c.get("note") or c.get("Notes") or ""
-        note = str(note).strip()
-        if len(note) < 50:
-            ids.append(cid)
-            logger.info(
-                f"Contract {cid} (ref={c.get('ref')}) needs notes "
-                f"(current length={len(note)})"
-            )
+        ids.append(cid)
 
     return ids
 
@@ -648,7 +686,7 @@ def _format_contract_for_summary(
         f"Prepaid Balance: {contract.get('contract_prepaybalance', 0)}",
     ]
     if doc_text:
-        lines.append(f"\nContract Document Text:\n{doc_text[:10000]}")
+        lines.append(f"\nContract Documents:\n{doc_text[:20000]}")
     return "\n".join(lines)
 
 

@@ -527,13 +527,15 @@ class HaloClient:
         Returns:
             Created opportunity details
         """
-        from datetime import datetime, timezone
+        from datetime import datetime, timedelta, timezone
 
+        now = datetime.now(timezone.utc)
         logger.info(f"Creating opportunity: {summary}")
         opp: Dict[str, Any] = {
             "summary": summary,
             "client_id": client_id,
-            "dateoccurred": datetime.now(timezone.utc).isoformat(),
+            "dateoccurred": now.isoformat(),
+            "targetdate": (now + timedelta(days=30)).isoformat(),
         }
         if details is not None:
             opp["details"] = details

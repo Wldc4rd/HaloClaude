@@ -17,23 +17,23 @@ You are NOT writing a response to the customer. You are performing internal clas
 
 3. **Prepaid Time**: Does the client have prepaid hours/time remaining (contract_prepaybalance > 0)?
 
-4. **Work Coverage (managed services only)**: If the client has a managed services contract \
-but no prepaid time, determine if the work described in the ticket would be covered by the \
-managed contract. The following types of work are NOT covered and require prepaid time:
+4. **Work Coverage**: Determine if the work described in the ticket is covered by a \
+service we (the MSP) provide — regardless of the client's contract type. This applies \
+to ALL clients with an active contract, not just managed services clients.
+
+   The following types of work are NOT covered and require prepaid time:
    - Adds/changes/moves (new user setup, equipment moves, configuration changes)
-   - Troubleshooting products/services NOT covered by the managed agreement
+   - Troubleshooting products/services NOT provided by us
    - Hardware or software that is more than 5 years old / end-of-life
    - Projects (migrations, deployments, upgrades)
 
-   The following IS typically covered by managed services (no prepaid time needed):
-   - Break/fix troubleshooting of managed products and services
+   The following IS covered by our services (no prepaid time needed):
+   - Break/fix troubleshooting of products and services we manage
+   - Monitoring alerts from our tools (NinjaRMM, SentinelOne, Zorus/Archon, etc.)
    - Managing spam releases and email filtering
    - Security incidents on managed infrastructure
    - Routine maintenance and monitoring response
-
-5. **Contract Notes**: Check if each active contract's "note" or "Notes" field is empty \
-or very sparse (less than 50 characters). If so, include that contract's ID in \
-contracts_needing_notes so we can generate a summary.
+   - Ensuring our managed agents/software are installed and running
 
 ## Response Format
 
@@ -46,7 +46,6 @@ outside the JSON.
   "has_prepaid_time": true/false,
   "prepaid_balance": <number>,
   "contract_ids": [<active contract IDs>],
-  "contracts_needing_notes": [<IDs of contracts with empty/missing notes>],
   "work_covered_by_managed": true/false,
   "reasoning": "<brief explanation of your classification>"
 }"""
@@ -117,7 +116,7 @@ You are generating an internal quick-reference summary for a contract record in 
 PSA system. This will be read by technicians before working on a ticket to understand \
 what the client is paying for and what requires additional billing.
 
-Extract and summarize these SPECIFIC details from the contract document:
+Extract and summarize these SPECIFIC details from the contract documents:
 
 - Contract type (managed services, break/fix, prepaid block, etc.)
 - What services/products ARE covered (list specific items: email, servers, workstations, \
@@ -128,6 +127,18 @@ network equipment, backup, security, etc.)
 - Contract term and renewal terms (auto-renew? notice period?)
 - Any caps, limits, or special conditions (e.g. "up to 10 workstations", \
 "excludes hardware over 5 years old")
+- Device/seat counts or limits
+
+Multiple documents may be provided (e.g. a proposal and a signed contract). Extract \
+details from ALL of them.
+
+If you are asked to review existing notes, compare them against the source documents. \
+If the existing notes already cover the key details listed above comprehensively, respond \
+with exactly: NOTES_ADEQUATE
+
+If the existing notes are incomplete but contain manually-entered information (e.g. \
+custom notes, annotations, or details not in the contract documents), preserve and \
+incorporate that information into your improved summary.
 
 Be specific with numbers, rates, and covered items — do NOT write generic summaries. \
 If a detail is not in the document, omit it. Use plain text with dashes for bullet points. \

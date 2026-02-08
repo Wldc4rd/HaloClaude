@@ -401,24 +401,85 @@ async def _stage2b_enrich_contracts(
     context: ContextData,
     contract_ids: List[int],
 ) -> None:
-    """Stage 2b: Fetch contract PDFs, generate summaries, and save as notes."""
-    # Build lookup by ID from context
+    """
+    Stage 2b: Evaluate contract notes and enrich if needed.
+
+    Two-pass approach to avoid fetching PDFs unnecessarily:
+    1. Quick evaluation: check existing notes for completeness (no PDF fetch)
+    2. PDF fetch + regeneration: only for contracts that need it
+    """
     contract_by_id: Dict[int, Dict[str, Any]] = {
         c["id"]: c for c in context.contracts if c.get("id")
     }
 
-    contracts_to_enrich = [
+    contracts_to_check = [
         contract_by_id[cid] for cid in contract_ids if cid in contract_by_id
     ]
 
     logger.info(
-        f"Contract enrichment: ids_to_enrich={contract_ids}, "
-        f"matched={[c.get('id') for c in contracts_to_enrich]}"
+        f"Contract enrichment: checking {len(contracts_to_check)} active contracts"
     )
+
+    # ── Pass 1: Quick evaluation of existing notes (no PDF fetch) ──
+    contracts_needing_pdfs: List[Dict[str, Any]] = []
+
+    for contract in contracts_to_check:
+        cid = contract.get("id")
+        if not cid:
+            continue
+
+        existing_note = str(contract.get("note") or contract.get("Notes") or "").strip()
+
+        # No notes at all — definitely needs enrichment
+        if len(existing_note) < 50:
+            logger.info(
+                f"Contract {cid} (ref={contract.get('ref')}): needs notes "
+                f"(current length={len(existing_note)})"
+            )
+            contracts_needing_pdfs.append(contract)
+            continue
+
+        # Has notes — ask Claude to quickly evaluate if they look complete
+        eval_response = await client.messages.create(
+            model=model,
+            max_tokens=10,
+            messages=[{
+                "role": "user",
+                "content": (
+                    f"Do these contract notes look complete? Check for:\n"
+                    f"- Mentions of missing information, unavailable appendices, "
+                    f"or details that could not be found\n"
+                    f"- Missing covered services/products list\n"
+                    f"- Missing billing rates or SLA response times\n"
+                    f"- Generic placeholder content\n\n"
+                    f"Respond with ONLY 'YES' if the notes are complete, "
+                    f"or 'NO' if they need improvement.\n\n"
+                    f"NOTES:\n{existing_note}"
+                ),
+            }],
+        )
+
+        verdict = eval_response.content[0].text.strip().upper()
+        if "NO" in verdict:
+            logger.info(
+                f"Contract {cid} (ref={contract.get('ref')}): "
+                f"notes need improvement"
+            )
+            contracts_needing_pdfs.append(contract)
+        else:
+            logger.info(
+                f"Contract {cid} (ref={contract.get('ref')}): notes are adequate"
+            )
+
+    if not contracts_needing_pdfs:
+        logger.info("All contract notes are adequate, skipping PDF fetch")
+        return
+
+    # ── Pass 2: Fetch PDFs and generate/regenerate summaries ──
+    from context.fetcher import ContextFetcher
     contract_doc_texts: Dict[int, str] = {}
 
-    # Fetch PDF attachments for each contract
-    for contract in contracts_to_enrich:
+    for contract in contracts_needing_pdfs:
         cid = contract.get("id")
         if not cid:
             continue
@@ -429,7 +490,6 @@ async def _stage2b_enrich_contracts(
                 continue
 
             # Read ALL PDF attachments (proposal, contract, etc.)
-            from context.fetcher import ContextFetcher
             all_texts = []
             pdf_attachments = [
                 att for att in attachments
@@ -462,8 +522,8 @@ async def _stage2b_enrich_contracts(
         except Exception as e:
             logger.warning(f"Failed to fetch PDFs for contract {cid}: {e}")
 
-    # Evaluate and generate/regenerate summaries
-    for contract in contracts_to_enrich:
+    # Generate summaries
+    for contract in contracts_needing_pdfs:
         cid = contract.get("id")
         if not cid:
             continue
@@ -471,30 +531,19 @@ async def _stage2b_enrich_contracts(
         existing_note = str(contract.get("note") or contract.get("Notes") or "").strip()
         doc_text = contract_doc_texts.get(cid, "")
 
-        # Skip contracts with no source documents AND no existing notes to improve
-        if not doc_text and not existing_note:
-            logger.debug(f"Contract {cid}: no documents and no existing notes, skipping")
-            continue
-
-        # If there are existing notes but no documents to compare against,
-        # there's nothing to improve — keep what's there
-        if not doc_text and existing_note:
-            logger.debug(f"Contract {cid}: has notes but no documents, skipping")
+        # No source documents available — nothing to generate from
+        if not doc_text:
+            logger.debug(f"Contract {cid}: no documents available, skipping")
             continue
 
         contract_text = _format_contract_for_summary(contract, doc_text)
 
-        # Ask Claude to evaluate and generate/regenerate
         if existing_note:
             user_content = (
-                f"Review the existing notes for this contract and determine if they "
-                f"are a comprehensive summary. If the existing notes are incomplete, "
-                f"missing key details from the contract documents, or appear to be "
-                f"auto-generated with insufficient information, generate an improved "
-                f"summary. Incorporate any manually-entered notes or details that "
-                f"appear in the existing notes.\n\n"
-                f"If the existing notes are already comprehensive, respond with "
-                f"exactly: NOTES_ADEQUATE\n\n"
+                f"The existing notes for this contract are incomplete. Generate an "
+                f"improved summary using the contract documents below. Incorporate "
+                f"any manually-entered information from the existing notes that does "
+                f"not appear in the source documents.\n\n"
                 f"EXISTING NOTES:\n{existing_note}\n\n"
                 f"CONTRACT DATA:\n{contract_text}"
             )
@@ -511,10 +560,6 @@ async def _stage2b_enrich_contracts(
         )
 
         summary = response.content[0].text.strip()
-
-        if summary == "NOTES_ADEQUATE":
-            logger.info(f"Contract {cid} (ref={contract.get('ref')}): notes are adequate")
-            continue
 
         await halo_client.update_contract(contract_id=cid, note=summary)
         logger.info(

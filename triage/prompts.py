@@ -130,15 +130,11 @@ network equipment, backup, security, etc.)
 - Device/seat counts or limits
 
 Multiple documents may be provided (e.g. a proposal and a signed contract). Extract \
-details from ALL of them.
+details from ALL of them, including appendices.
 
-If you are asked to review existing notes, compare them against the source documents. \
-If the existing notes already cover the key details listed above comprehensively, respond \
-with exactly: NOTES_ADEQUATE
-
-If the existing notes are incomplete but contain manually-entered information (e.g. \
-custom notes, annotations, or details not in the contract documents), preserve and \
-incorporate that information into your improved summary.
+If existing notes are provided, incorporate any manually-entered information from them \
+(e.g. custom notes, annotations, or details not found in the contract documents) into \
+your improved summary.
 
 Be specific with numbers, rates, and covered items — do NOT write generic summaries. \
 If a detail is not in the document, omit it. Use plain text with dashes for bullet points. \

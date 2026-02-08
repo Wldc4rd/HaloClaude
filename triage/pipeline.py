@@ -731,7 +731,7 @@ def _format_contract_for_summary(
         f"Prepaid Balance: {contract.get('contract_prepaybalance', 0)}",
     ]
     if doc_text:
-        lines.append(f"\nContract Documents:\n{doc_text[:20000]}")
+        lines.append(f"\nContract Documents:\n{doc_text}")
     return "\n".join(lines)
 
 

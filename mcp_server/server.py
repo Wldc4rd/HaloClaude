@@ -155,6 +155,37 @@ async def update_ticket(
 
 
 @mcp.tool(
+    description="Set the priority on a ticket. Priority IDs: "
+    "1=Critical, 2=High, 3=Medium, 4=Low. "
+    "Optionally set the SLA if it is incorrect."
+)
+async def set_ticket_priority(
+    ticket_id: int,
+    priority_id: int,
+    sla_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Set priority (and optionally SLA) on a Halo PSA ticket.
+
+    Args:
+        ticket_id: The ticket ID to update
+        priority_id: Priority level (1=Critical, 2=High, 3=Medium, 4=Low)
+        sla_id: SLA ID override (1=Default, 3=Bronze/Break-Fix,
+                4=Managed Gold, 5=Managed Silver)
+    """
+    logger.info(
+        f"MCP: set_ticket_priority called on ticket_id={ticket_id}, "
+        f"priority_id={priority_id}, sla_id={sla_id}"
+    )
+    client = get_halo_client()
+    return await client.update_ticket(
+        ticket_id=ticket_id,
+        priority_id=priority_id,
+        sla_id=sla_id,
+    )
+
+
+@mcp.tool(
     description="Close/resolve a ticket. Optionally include a private closure note "
     "summarizing the resolution."
 )
@@ -307,6 +338,35 @@ async def get_client_tickets(
     logger.info(f"MCP: get_client_tickets called with client_id={client_id}")
     client = get_halo_client()
     return await client.get_client_tickets(client_id, count, open_only)
+
+
+# =============================================================================
+# Contract / Billing Tools
+# =============================================================================
+
+@mcp.tool(
+    description="Get recurring invoices for a contract or client. Returns the "
+    "actual billed line items with descriptions, quantities, and prices. "
+    "This is the definitive source of truth for what services a client is "
+    "paying for on a contract."
+)
+async def get_recurring_invoices(
+    contract_id: Optional[int] = None,
+    client_id: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Retrieve recurring invoices from Halo PSA.
+
+    Args:
+        contract_id: Filter by contract ID
+        client_id: Filter by client/company ID
+    """
+    logger.info(
+        f"MCP: get_recurring_invoices called with "
+        f"contract_id={contract_id}, client_id={client_id}"
+    )
+    client = get_halo_client()
+    return await client.get_recurring_invoices(contract_id, client_id)
 
 
 # =============================================================================

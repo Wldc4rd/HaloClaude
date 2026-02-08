@@ -74,8 +74,12 @@ a brief note about the resolution used.
 5. **Device Status**: If NinjaRMM device data is available in the context, note any \
 relevant findings (disk space issues, active alerts, pending patches, online/offline status).
 
-6. **Priority Assessment**: Based on the issue, suggest if the current priority should \
-be changed.
+6. **Priority Assessment**: Assess the appropriate priority for this ticket and SET IT \
+using the set_ticket_priority tool. Priority levels: \
+1=Critical (system down, security incident, all users affected), \
+2=High (major feature broken, many users affected, time-sensitive), \
+3=Medium (single user issue, workaround exists, not urgent), \
+4=Low (cosmetic, informational, planned work, feature request).
 
 ## Instructions
 
@@ -83,6 +87,8 @@ be changed.
 symptoms, or keywords from the ticket)
 - Use the search_kb tool to find relevant knowledge base articles
 - Use NinjaRMM tools if device data would help diagnose the issue
+- Use the set_ticket_priority tool to set the priority based on your analysis. \
+You MUST call this tool — do not just recommend a priority.
 - Be specific and actionable in your recommendations
 - Format your output as a clean, readable note that a technician can act on immediately
 
@@ -108,7 +114,7 @@ SIMILAR PAST TICKETS:
 DEVICE STATUS:
 - ...
 
-PRIORITY ASSESSMENT: <recommendation>"""
+PRIORITY SET: <level> — <brief justification>"""
 
 
 CONTRACT_SUMMARY_PROMPT = """\
@@ -133,15 +139,27 @@ Multiple documents may be provided (e.g. a proposal and a signed contract). Extr
 details from ALL of them, including appendices.
 
 IMPORTANT: Contract documents often contain tables of optional services with checkboxes. \
-Only list a service as INCLUDED if it is clearly checked/selected (e.g. ☑, ✓, [x], \
-filled radio button ◉, or similar). Items with empty/unchecked boxes (☐, [ ], ○, or \
-no mark) are NOT included. PDF text extraction often fails to capture checkbox states \
-reliably, so you MUST use the subtotal/total as the definitive source of truth: \
-add up the prices of the services you believe are selected — if the sum does not \
-match the documented subtotal, remove items until it does. The subtotal is always \
-correct; do not rationalize a mismatch by treating unmatched items as "separate \
-billing items" or similar. An item whose price causes the total to exceed the \
-subtotal is NOT selected.
+PDF text extraction cannot capture checkbox states reliably, so do NOT rely on the \
+contract document alone to determine which services are selected. If a recurring \
+invoice is provided, use it as the definitive source of truth — the line items on \
+the recurring invoice are exactly what the client is paying for. If no recurring \
+invoice is available, use the subtotal/total as a cross-check: add up the prices \
+of services you believe are selected — if the sum does not match the documented \
+subtotal, remove items until it does. The subtotal is always correct.
+
+NOTE: Recurring invoice quantities are dynamic — they reflect the CURRENT billing \
+period and change as devices, users, or seats are added or removed. They may not \
+match the quantities in the original signed contract. Use the recurring invoice \
+to determine WHICH services are active, but use the contract documents for the \
+per-unit pricing, terms, SLAs, and other static details.
+
+IMPORTANT: This summary describes the contract's TERMS and STRUCTURE — it is not \
+regenerated frequently, so do NOT include point-in-time data that changes over the \
+life of the contract. Specifically:
+- Do NOT include current prepaid balance / hours remaining
+- Do NOT include current device or seat counts from the recurring invoice
+- DO include per-unit pricing, included quantities from the signed contract, \
+rate tiers, and any caps or limits defined in the contract terms
 
 If existing notes are provided, incorporate any manually-entered information from them \
 (e.g. custom notes, annotations, or details not found in the contract documents) into \

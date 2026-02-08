@@ -243,6 +243,7 @@ class HaloClient:
         team_id: Optional[int] = None,
         status_id: Optional[int] = None,
         asset_id: Optional[int] = None,
+        sla_id: Optional[int] = None,
     ) -> Any:
         """
         Update an existing ticket.
@@ -258,6 +259,7 @@ class HaloClient:
             agent_id: New assigned agent ID
             team_id: New assigned team ID
             status_id: New status ID
+            sla_id: New SLA ID
 
         Returns:
             Updated ticket details
@@ -284,6 +286,8 @@ class HaloClient:
             ticket["status_id"] = status_id
         if asset_id is not None:
             ticket["asset_id"] = asset_id
+        if sla_id is not None:
+            ticket["sla_id"] = sla_id
         return await self._request("POST", "tickets", json=[ticket])
 
     async def close_ticket(
@@ -542,6 +546,46 @@ class HaloClient:
         if agent_id is not None:
             opp["agent_id"] = agent_id
         return await self._request("POST", "Opportunities", json=[opp])
+
+    # =========================================================================
+    # Recurring Invoice Operations
+    # =========================================================================
+
+    async def get_recurring_invoices(
+        self,
+        contract_id: Optional[int] = None,
+        client_id: Optional[int] = None,
+        include_lines: bool = True,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get recurring invoices, optionally filtered by contract or client.
+
+        Args:
+            contract_id: Filter by contract ID
+            client_id: Filter by client ID
+            include_lines: Include line item details (default True)
+
+        Returns:
+            List of recurring invoice records with line items
+        """
+        params: Dict[str, Any] = {
+            "includelines": str(include_lines).lower(),
+        }
+        if contract_id is not None:
+            params["contract_id"] = contract_id
+        if client_id is not None:
+            params["client_id"] = client_id
+
+        logger.debug(
+            f"Fetching recurring invoices (contract_id={contract_id}, "
+            f"client_id={client_id})"
+        )
+        result = await self._request("GET", "RecurringInvoice", params=params)
+        invoices = result.get("invoices", []) if isinstance(result, dict) else result
+        if isinstance(invoices, dict):
+            invoices = [invoices]
+        logger.info(f"Fetched {len(invoices)} recurring invoices")
+        return invoices
 
     # =========================================================================
     # Contract Operations

@@ -420,8 +420,10 @@ async def _stage2b_enrich_contracts(
         f"Contract enrichment: checking {len(contracts_to_check)} active contracts"
     )
 
-    # ── Pass 1: Quick evaluation of existing notes (no PDF fetch) ──
+    # ── Pass 1: Fetch recurring invoices (cheap) and evaluate notes ──
     contracts_needing_pdfs: List[Dict[str, Any]] = []
+    # Cache invoice text so Pass 2 can reuse without re-fetching
+    contract_invoice_cache: Dict[int, str] = {}
 
     for contract in contracts_to_check:
         cid = contract.get("id")
@@ -429,6 +431,35 @@ async def _stage2b_enrich_contracts(
             continue
 
         existing_note = str(contract.get("note") or contract.get("Notes") or "").strip()
+
+        # Fetch recurring invoice (lightweight API call, no PDF)
+        invoice_summary = ""
+        try:
+            invoices = await halo_client.get_recurring_invoices(contract_id=cid)
+            if invoices:
+                lines = []
+                for inv in invoices:
+                    for line in inv.get("lines", []):
+                        desc = (
+                            line.get("item_shortdescription")
+                            or line.get("item_longdescription")
+                            or "Unknown"
+                        )
+                        # Strip date range template tokens from description
+                        desc = desc.split("$")[0].strip()
+                        price = line.get("unit_price", "?")
+                        qty = line.get("qty_order", "?")
+                        net = line.get("net_amount", "?")
+                        lines.append(f"  - {desc}: ${price} x {qty} = ${net}")
+                if lines:
+                    total = invoices[0].get("total", "?")
+                    invoice_summary = (
+                        f"Recurring Invoice (Total: ${total}):\n"
+                        + "\n".join(lines)
+                    )
+                    contract_invoice_cache[cid] = invoice_summary
+        except Exception as e:
+            logger.warning(f"Failed to fetch recurring invoice for contract {cid}: {e}")
 
         # No notes at all — definitely needs enrichment
         if len(existing_note) < 50:
@@ -439,27 +470,33 @@ async def _stage2b_enrich_contracts(
             contracts_needing_pdfs.append(contract)
             continue
 
-        # Has notes — ask Claude to quickly evaluate if they look complete
+        # Has notes — evaluate completeness against the recurring invoice
+        eval_content = (
+            f"Do these contract notes look complete? Check for:\n"
+            f"- Mentions of missing information, unavailable appendices, "
+            f"or details that could not be found\n"
+            f"- Missing covered services/products list\n"
+            f"- Missing billing rates or SLA response times\n"
+            f"- Generic placeholder content\n"
+        )
+        if invoice_summary:
+            eval_content += (
+                f"- Compare the services listed in the notes against the "
+                f"recurring invoice below. If the notes list services that "
+                f"are NOT on the recurring invoice, or miss services that "
+                f"ARE on the invoice, the notes need improvement.\n\n"
+                f"{invoice_summary}\n\n"
+            )
+        eval_content += (
+            f"Respond with ONLY 'YES' if the notes are complete, "
+            f"or 'NO' if they need improvement.\n\n"
+            f"NOTES:\n{existing_note}"
+        )
+
         eval_response = await client.messages.create(
             model=model,
             max_tokens=10,
-            messages=[{
-                "role": "user",
-                "content": (
-                    f"Do these contract notes look complete? Check for:\n"
-                    f"- Mentions of missing information, unavailable appendices, "
-                    f"or details that could not be found\n"
-                    f"- Missing covered services/products list\n"
-                    f"- Missing billing rates or SLA response times\n"
-                    f"- Generic placeholder content\n"
-                    f"- If individual service prices are listed along with a "
-                    f"subtotal or total, do the line items add up to the total? "
-                    f"If not, the wrong items may be marked as included.\n\n"
-                    f"Respond with ONLY 'YES' if the notes are complete, "
-                    f"or 'NO' if they need improvement.\n\n"
-                    f"NOTES:\n{existing_note}"
-                ),
-            }],
+            messages=[{"role": "user", "content": eval_content}],
         )
 
         verdict = eval_response.content[0].text.strip().upper()
@@ -478,7 +515,8 @@ async def _stage2b_enrich_contracts(
         logger.info("All contract notes are adequate, skipping PDF fetch")
         return
 
-    # ── Pass 2: Fetch PDFs and generate/regenerate summaries ──
+    # ── Pass 2: Fetch PDFs and generate summaries ──
+    # Recurring invoices were already fetched in Pass 1 (contract_invoice_cache)
     from context.fetcher import ContextFetcher
     contract_doc_texts: Dict[int, str] = {}
 
@@ -486,13 +524,13 @@ async def _stage2b_enrich_contracts(
         cid = contract.get("id")
         if not cid:
             continue
+
         try:
             attachments = await halo_client.get_contract_attachments(cid)
             if not attachments:
                 logger.debug(f"No attachments for contract {cid}")
                 continue
 
-            # Read ALL PDF attachments (proposal, contract, etc.)
             all_texts = []
             pdf_attachments = [
                 att for att in attachments
@@ -533,20 +571,28 @@ async def _stage2b_enrich_contracts(
 
         existing_note = str(contract.get("note") or contract.get("Notes") or "").strip()
         doc_text = contract_doc_texts.get(cid, "")
+        invoice_text = contract_invoice_cache.get(cid, "")
 
-        # No source documents available — nothing to generate from
-        if not doc_text:
-            logger.debug(f"Contract {cid}: no documents available, skipping")
+        # No source data available — nothing to generate from
+        if not doc_text and not invoice_text:
+            logger.debug(f"Contract {cid}: no documents or invoices available, skipping")
             continue
 
         contract_text = _format_contract_for_summary(contract, doc_text)
 
+        # Append recurring invoice data if available
+        if invoice_text:
+            contract_text += (
+                f"\n\nRecurring Invoice (definitive source of billed services):\n"
+                f"{invoice_text}"
+            )
+
         if existing_note:
             user_content = (
                 f"The existing notes for this contract are incomplete. Generate an "
-                f"improved summary using the contract documents below. Incorporate "
-                f"any manually-entered information from the existing notes that does "
-                f"not appear in the source documents.\n\n"
+                f"improved summary using the contract documents and recurring "
+                f"invoice below. Incorporate any manually-entered information from "
+                f"the existing notes that does not appear in the source documents.\n\n"
                 f"EXISTING NOTES:\n{existing_note}\n\n"
                 f"CONTRACT DATA:\n{contract_text}"
             )
@@ -776,6 +822,17 @@ async def _execute_triage_tool(
             return await halo_client.get_kb_article(tool_input["article_id"])
         elif tool_name == "get_client_contracts":
             return await halo_client.get_client_contracts(tool_input["client_id"])
+        elif tool_name == "get_recurring_invoices":
+            return await halo_client.get_recurring_invoices(
+                contract_id=tool_input.get("contract_id"),
+                client_id=tool_input.get("client_id"),
+            )
+        elif tool_name == "set_ticket_priority":
+            return await halo_client.update_ticket(
+                ticket_id=tool_input["ticket_id"],
+                priority_id=tool_input["priority_id"],
+                sla_id=tool_input.get("sla_id"),
+            )
         # NinjaRMM read-only tools
         elif tool_name.startswith("ninja_") and ninja_client:
             method_map = {
@@ -811,14 +868,16 @@ def _get_triage_tools() -> List[Dict[str, Any]]:
     from halo.tools import get_halo_tools
     from ninja.tools import get_ninja_tools
 
-    # Whitelist of read-only Halo tool names
-    read_only_halo = {
+    # Whitelist of Halo tool names available in triage
+    # (read-only tools + set_ticket_priority for priority assessment)
+    triage_halo_tools = {
         "get_ticket", "get_user", "get_client", "get_asset",
         "search_tickets", "search_kb", "get_kb_article",
-        "get_client_contracts",
+        "get_client_contracts", "get_recurring_invoices",
+        "set_ticket_priority",
     }
 
-    tools = [t for t in get_halo_tools() if t["name"] in read_only_halo]
+    tools = [t for t in get_halo_tools() if t["name"] in triage_halo_tools]
 
     # Add all NinjaRMM tools (all read-only)
     try:

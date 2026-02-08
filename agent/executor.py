@@ -276,6 +276,19 @@ class AgentExecutor:
             elif tool_name == "get_kb_article":
                 return await self.halo_client.get_kb_article(tool_input["article_id"])
 
+            elif tool_name == "get_recurring_invoices":
+                return await self.halo_client.get_recurring_invoices(
+                    contract_id=tool_input.get("contract_id"),
+                    client_id=tool_input.get("client_id"),
+                )
+
+            elif tool_name == "set_ticket_priority":
+                return await self.halo_client.update_ticket(
+                    ticket_id=tool_input["ticket_id"],
+                    priority_id=tool_input["priority_id"],
+                    sla_id=tool_input.get("sla_id"),
+                )
+
             elif tool_name == "create_ticket":
                 return await self.halo_client.create_ticket(
                     summary=tool_input["summary"],

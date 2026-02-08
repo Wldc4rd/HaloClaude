@@ -238,6 +238,62 @@ def get_halo_tools() -> List[Dict[str, Any]]:
             },
         },
         {
+            "name": "get_recurring_invoices",
+            "description": (
+                "Get recurring invoices for a contract or client. Returns the "
+                "actual billed line items with descriptions, quantities, and "
+                "prices. This is the definitive source of truth for what "
+                "services a client is paying for on a contract."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "contract_id": {
+                        "type": "integer",
+                        "description": "Filter by contract ID",
+                    },
+                    "client_id": {
+                        "type": "integer",
+                        "description": "Filter by client/company ID",
+                    },
+                },
+            },
+        },
+        {
+            "name": "set_ticket_priority",
+            "description": (
+                "Set the priority on a ticket. Priority IDs: "
+                "1 = Critical, 2 = High, 3 = Medium, 4 = Low. "
+                "The SLA is normally inherited from the client's contract "
+                "and should not be changed unless it is clearly incorrect."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "ticket_id": {
+                        "type": "integer",
+                        "description": "The ticket ID to update",
+                    },
+                    "priority_id": {
+                        "type": "integer",
+                        "description": (
+                            "Priority level: 1=Critical, 2=High, 3=Medium, 4=Low"
+                        ),
+                        "enum": [1, 2, 3, 4],
+                    },
+                    "sla_id": {
+                        "type": "integer",
+                        "description": (
+                            "SLA ID (only set if the current SLA is incorrect). "
+                            "1=Default, 3=Bronze/Break-Fix, "
+                            "4=Managed Gold, 5=Managed Silver"
+                        ),
+                    },
+                },
+                "required": ["ticket_id", "priority_id"],
+            },
+        },
+        {
             "name": "create_ticket",
             "description": (
                 "Create a new ticket in Halo PSA. Requires a summary and client_id. "

@@ -132,6 +132,14 @@ network equipment, backup, security, etc.)
 Multiple documents may be provided (e.g. a proposal and a signed contract). Extract \
 details from ALL of them, including appendices.
 
+IMPORTANT: Contract documents often contain tables of optional services with checkboxes. \
+Only list a service as INCLUDED if it is clearly checked/selected (e.g. ☑, ✓, [x], or \
+similar). Items with empty/unchecked boxes (☐, [ ], or no mark) are NOT included — list \
+them under exclusions or omit them. If the selection state is ambiguous, note it as unclear. \
+Cross-check your selections against any subtotal or total amount in the contract — the \
+prices of the services you identify as included should add up to the documented total. \
+If they don't match, re-examine which options are actually selected.
+
 If existing notes are provided, incorporate any manually-entered information from them \
 (e.g. custom notes, annotations, or details not found in the contract documents) into \
 your improved summary.

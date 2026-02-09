@@ -185,4 +185,26 @@ def get_ninja_tools() -> List[Dict[str, Any]]:
                 "required": ["device_id"],
             },
         },
+        {
+            "name": "ninja_search_devices",
+            "description": (
+                "Search for devices in NinjaRMM by hostname, logged-on user, IP address, "
+                "serial number, or other identifying information. Returns matching device "
+                "summaries with IDs that can be used with other ninja_get_device_* tools."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query (hostname, username, IP address, etc.)",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of results (default: 25)",
+                    },
+                },
+                "required": ["query"],
+            },
+        },
     ]

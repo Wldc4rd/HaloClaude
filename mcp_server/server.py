@@ -340,6 +340,127 @@ async def get_client_tickets(
     return await client.get_client_tickets(client_id, count, open_only)
 
 
+@mcp.tool(
+    description="List tickets with structured filters. Unlike search_tickets (keyword search), "
+    "this filters by client, open/closed status, date ranges, assigned agent, or linked asset. "
+    "Returns summary-level data including status, priority, agent, and last action date."
+)
+async def list_tickets(
+    client_id: Optional[int] = None,
+    open_only: bool = False,
+    closed_only: bool = False,
+    agent_id: Optional[int] = None,
+    asset_id: Optional[int] = None,
+    opened_after: Optional[str] = None,
+    opened_before: Optional[str] = None,
+    last_updated_after: Optional[str] = None,
+    last_updated_before: Optional[str] = None,
+    count: int = 25,
+) -> List[Dict[str, Any]]:
+    """
+    List tickets with structured filters.
+
+    Args:
+        client_id: Filter by client/company ID
+        open_only: Only return open/active tickets
+        closed_only: Only return closed tickets
+        agent_id: Filter by assigned agent ID
+        asset_id: Filter by linked asset ID
+        opened_after: Only tickets opened after this date (ISO format)
+        opened_before: Only tickets opened before this date (ISO format)
+        last_updated_after: Only tickets last updated after this date (ISO format)
+        last_updated_before: Only tickets last updated before this date (ISO format)
+        count: Maximum results (default 25, max 100)
+    """
+    logger.info("MCP: list_tickets called")
+    client = get_halo_client()
+    kwargs: Dict[str, Any] = {
+        "client_id": client_id,
+        "open_only": open_only,
+        "closed_only": closed_only,
+        "agent_id": agent_id,
+        "asset_id": asset_id,
+        "count": count,
+        "order": "dateoccured",
+        "orderdesc": True,
+    }
+    if opened_after or opened_before:
+        kwargs["datesearch"] = "dateoccured"
+        kwargs["startdate"] = opened_after
+        kwargs["enddate"] = opened_before
+    kwargs["lastupdatefromdate"] = last_updated_after
+    kwargs["lastupdatetodate"] = last_updated_before
+    return await client.list_tickets(**kwargs)
+
+
+@mcp.tool(
+    description="Close multiple tickets at once with a shared closure note. "
+    "Returns a summary showing which succeeded and which failed."
+)
+async def batch_close_tickets(
+    ticket_ids: List[int],
+    note: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Close multiple tickets at once.
+
+    Args:
+        ticket_ids: Array of ticket IDs to close
+        note: Closure note applied to all tickets (private)
+    """
+    logger.info(f"MCP: batch_close_tickets called for {len(ticket_ids)} tickets")
+    client = get_halo_client()
+    return await client.batch_close_tickets(ticket_ids, note)
+
+
+@mcp.tool(
+    description="Get tickets that are linked/related to a specific ticket. "
+    "Shows associated issues and parent/child relationships."
+)
+async def get_related_tickets(ticket_id: int) -> List[Dict[str, Any]]:
+    """
+    Get related/linked tickets from Halo PSA.
+
+    Args:
+        ticket_id: The ticket ID to find related tickets for
+    """
+    logger.info(f"MCP: get_related_tickets called with ticket_id={ticket_id}")
+    client = get_halo_client()
+    return await client.get_related_tickets(ticket_id)
+
+
+# =============================================================================
+# User Tools (additions)
+# =============================================================================
+
+@mcp.tool(
+    description="List users belonging to a client/company. Returns active users by default. "
+    "Set include_inactive to true to also see departed/disabled employees."
+)
+async def get_client_users(
+    client_id: int,
+    include_active: bool = True,
+    include_inactive: bool = False,
+    search: Optional[str] = None,
+    count: int = 50,
+) -> List[Dict[str, Any]]:
+    """
+    List users for a client/company.
+
+    Args:
+        client_id: The client/company ID
+        include_active: Include active users (default True)
+        include_inactive: Include inactive/departed users (default False)
+        search: Text search filter
+        count: Maximum results (default 50)
+    """
+    logger.info(f"MCP: get_client_users called with client_id={client_id}")
+    client = get_halo_client()
+    return await client.get_client_users(
+        client_id, include_active, include_inactive, search, count,
+    )
+
+
 # =============================================================================
 # Contract / Billing Tools
 # =============================================================================
@@ -372,6 +493,30 @@ async def get_recurring_invoices(
 # =============================================================================
 # Asset Tools
 # =============================================================================
+
+@mcp.tool(
+    description="Search for assets/devices in Halo PSA by name or hostname. "
+    "Optionally filter by client/company."
+)
+async def search_assets(
+    search: Optional[str] = None,
+    client_id: Optional[int] = None,
+    count: int = 50,
+) -> List[Dict[str, Any]]:
+    """
+    Search assets in Halo PSA.
+
+    Args:
+        search: Text search (asset name, hostname, etc.)
+        client_id: Filter by client/company ID
+        count: Maximum results (default 50)
+    """
+    logger.info(f"MCP: search_assets called with search={search}")
+    client = get_halo_client()
+    return await client.search_assets(
+        client_id=client_id, search=search, count=count,
+    )
+
 
 @mcp.tool(
     description="Get information about an asset/device including its "

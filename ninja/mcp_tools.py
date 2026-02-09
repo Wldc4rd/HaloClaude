@@ -191,3 +191,24 @@ async def ninja_get_device_windows_services(device_id: int) -> List[Dict[str, An
     logger.info(f"MCP: ninja_get_device_windows_services called with device_id={device_id}")
     client = get_ninja_client()
     return await client.get_device_windows_services(device_id)
+
+
+@mcp.tool(
+    description="Search for devices in NinjaRMM by hostname, logged-on user, "
+    "IP address, or serial number. Returns matching device summaries with IDs "
+    "that can be used with other ninja_get_device_* tools."
+)
+async def ninja_search_devices(
+    query: str,
+    limit: int = 25,
+) -> List[Dict[str, Any]]:
+    """
+    Search devices in NinjaRMM.
+
+    Args:
+        query: Search query (hostname, username, IP address, etc.)
+        limit: Maximum number of results (default 25)
+    """
+    logger.info(f"MCP: ninja_search_devices called with query={query}")
+    client = get_ninja_client()
+    return await client.search_devices(query, limit)

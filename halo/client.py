@@ -290,6 +290,41 @@ class HaloClient:
             ticket["sla_id"] = sla_id
         return await self._request("POST", "tickets", json=[ticket])
 
+    async def batch_close_tickets(
+        self,
+        ticket_ids: List[int],
+        note: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Close multiple tickets with a shared closure note.
+
+        Args:
+            ticket_ids: List of ticket IDs to close
+            note: Optional closure note applied to all tickets (private)
+
+        Returns:
+            Summary dict with succeeded/failed ticket IDs
+        """
+        import asyncio
+        logger.info(f"Batch closing {len(ticket_ids)} tickets")
+
+        results: Dict[str, Any] = {"succeeded": [], "failed": []}
+
+        async def _close_one(tid: int):
+            try:
+                await self.close_ticket(ticket_id=tid, note=note)
+                results["succeeded"].append(tid)
+            except Exception as e:
+                logger.error(f"Failed to close ticket {tid}: {e}")
+                results["failed"].append({"ticket_id": tid, "error": str(e)})
+
+        await asyncio.gather(*[_close_one(tid) for tid in ticket_ids])
+        logger.info(
+            f"Batch close complete: {len(results['succeeded'])} succeeded, "
+            f"{len(results['failed'])} failed"
+        )
+        return results
+
     async def close_ticket(
         self,
         ticket_id: int,
@@ -374,10 +409,86 @@ class HaloClient:
         )
         return tickets
 
+    async def list_tickets(
+        self,
+        client_id: Optional[int] = None,
+        open_only: bool = False,
+        closed_only: bool = False,
+        agent_id: Optional[int] = None,
+        asset_id: Optional[int] = None,
+        datesearch: Optional[str] = None,
+        startdate: Optional[str] = None,
+        enddate: Optional[str] = None,
+        lastupdatefromdate: Optional[str] = None,
+        lastupdatetodate: Optional[str] = None,
+        order: Optional[str] = None,
+        orderdesc: bool = True,
+        count: int = 25,
+    ) -> List[Dict[str, Any]]:
+        """
+        List tickets with rich filtering.
+
+        Unlike search_tickets (keyword search), this uses structured filters
+        for date ranges, agents, assets, and status.
+
+        Args:
+            client_id: Filter by client/company ID
+            open_only: Only return open tickets
+            closed_only: Only return closed tickets
+            agent_id: Filter by assigned agent ID
+            asset_id: Filter by linked asset ID
+            datesearch: Date field to filter on (e.g. "dateoccured")
+            startdate: Start date for datesearch filter (ISO format)
+            enddate: End date for datesearch filter (ISO format)
+            lastupdatefromdate: Only tickets updated on or after this date
+            lastupdatetodate: Only tickets updated on or before this date
+            order: Field name to order by
+            orderdesc: Whether to order descending (default True)
+            count: Maximum results to return (default 25, max 100)
+
+        Returns:
+            List of ticket summary objects
+        """
+        params: Dict[str, Any] = {
+            "count": min(count, 100),
+        }
+        if client_id is not None:
+            params["client_id"] = client_id
+        if open_only:
+            params["open_only"] = "true"
+        if closed_only:
+            params["closed_only"] = "true"
+        if agent_id is not None:
+            params["agent_id"] = agent_id
+        if asset_id is not None:
+            params["asset_id"] = asset_id
+        if datesearch:
+            params["datesearch"] = datesearch
+        if startdate:
+            params["startdate"] = startdate
+        if enddate:
+            params["enddate"] = enddate
+        if lastupdatefromdate:
+            params["lastupdatefromdate"] = lastupdatefromdate
+        if lastupdatetodate:
+            params["lastupdatetodate"] = lastupdatetodate
+        if order:
+            params["order"] = order
+            params["orderdesc"] = str(orderdesc).lower()
+
+        logger.debug(f"Listing tickets with filters: {params}")
+        result = await self._request("GET", "tickets", params=params)
+        tickets = result.get("tickets", [])
+        logger.info(
+            f"list_tickets returned {len(tickets)} tickets "
+            f"(record_count={result.get('record_count', '?')})"
+        )
+        return tickets
+
     # =========================================================================
     # User Operations
     # =========================================================================
-    
+
     async def get_user(self, user_id: int) -> Dict[str, Any]:
         """
         Get user details by ID.
@@ -419,10 +530,48 @@ class HaloClient:
         result = await self._request("GET", "tickets", params=params)
         return result.get("tickets", [])
     
+    async def get_client_users(
+        self,
+        client_id: int,
+        include_active: bool = True,
+        include_inactive: bool = False,
+        search: Optional[str] = None,
+        count: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """
+        List users belonging to a client/company.
+
+        Args:
+            client_id: The client/company ID
+            include_active: Include active users (default True)
+            include_inactive: Include inactive/departed users (default False)
+            search: Optional text search filter
+            count: Maximum results to return (default 50)
+
+        Returns:
+            List of user records for the client
+        """
+        params: Dict[str, Any] = {
+            "client_id": client_id,
+            "count": count,
+            "includeactive": str(include_active).lower(),
+            "includeinactive": str(include_inactive).lower(),
+        }
+        if search:
+            params["search"] = search
+
+        logger.debug(f"Fetching users for client {client_id}")
+        result = await self._request("GET", "Users", params=params)
+        users = result.get("users", []) if isinstance(result, dict) else result
+        if isinstance(users, dict):
+            users = [users]
+        logger.info(f"Fetched {len(users)} users for client {client_id}")
+        return users
+
     # =========================================================================
     # Client/Company Operations
     # =========================================================================
-    
+
     async def get_client(self, client_id: int) -> Dict[str, Any]:
         """
         Get client/company details by ID.

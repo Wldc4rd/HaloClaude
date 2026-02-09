@@ -329,6 +329,54 @@ class AgentExecutor:
                     action_id=tool_input.get("action_id"),
                 )
 
+            elif tool_name == "list_tickets":
+                kwargs = {
+                    "client_id": tool_input.get("client_id"),
+                    "open_only": tool_input.get("open_only", False),
+                    "closed_only": tool_input.get("closed_only", False),
+                    "agent_id": tool_input.get("agent_id"),
+                    "asset_id": tool_input.get("asset_id"),
+                    "count": tool_input.get("count", 25),
+                    "order": "dateoccured",
+                    "orderdesc": True,
+                }
+                opened_after = tool_input.get("opened_after")
+                opened_before = tool_input.get("opened_before")
+                if opened_after or opened_before:
+                    kwargs["datesearch"] = "dateoccured"
+                    kwargs["startdate"] = opened_after
+                    kwargs["enddate"] = opened_before
+                kwargs["lastupdatefromdate"] = tool_input.get("last_updated_after")
+                kwargs["lastupdatetodate"] = tool_input.get("last_updated_before")
+                return await self.halo_client.list_tickets(**kwargs)
+
+            elif tool_name == "batch_close_tickets":
+                return await self.halo_client.batch_close_tickets(
+                    ticket_ids=tool_input["ticket_ids"],
+                    note=tool_input.get("note"),
+                )
+
+            elif tool_name == "get_client_users":
+                return await self.halo_client.get_client_users(
+                    client_id=tool_input["client_id"],
+                    include_active=tool_input.get("include_active", True),
+                    include_inactive=tool_input.get("include_inactive", False),
+                    search=tool_input.get("search"),
+                    count=tool_input.get("count", 50),
+                )
+
+            elif tool_name == "search_assets":
+                return await self.halo_client.search_assets(
+                    search=tool_input.get("search"),
+                    client_id=tool_input.get("client_id"),
+                    count=tool_input.get("count", 50),
+                )
+
+            elif tool_name == "get_related_tickets":
+                return await self.halo_client.get_related_tickets(
+                    ticket_id=tool_input["ticket_id"],
+                )
+
             # NinjaRMM tools
             elif tool_name == "ninja_get_device":
                 if not self.ninja_client:
@@ -379,6 +427,14 @@ class AgentExecutor:
                 if not self.ninja_client:
                     return {"error": "NinjaRMM integration is not enabled"}
                 return await self.ninja_client.get_device_windows_services(tool_input["device_id"])
+
+            elif tool_name == "ninja_search_devices":
+                if not self.ninja_client:
+                    return {"error": "NinjaRMM integration is not enabled"}
+                return await self.ninja_client.search_devices(
+                    query=tool_input["query"],
+                    limit=tool_input.get("limit", 25),
+                )
 
             # Mesh Email Security tools
             elif tool_name == "mesh_search_email_logs":

@@ -445,4 +445,158 @@ def get_halo_tools() -> List[Dict[str, Any]]:
                 "required": ["ticket_id", "note"],
             },
         },
+        {
+            "name": "list_tickets",
+            "description": (
+                "List tickets with structured filters. Unlike search_tickets (keyword search), "
+                "this filters by client, status (open/closed), date ranges, assigned agent, "
+                "or linked asset. Returns summary-level data including status, priority, agent, "
+                "and last action date. Use for browsing/filtering tickets rather than keyword searching."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "client_id": {
+                        "type": "integer",
+                        "description": "Filter by client/company ID",
+                    },
+                    "open_only": {
+                        "type": "boolean",
+                        "description": "Only return open/active tickets (default: false)",
+                    },
+                    "closed_only": {
+                        "type": "boolean",
+                        "description": "Only return closed tickets (default: false)",
+                    },
+                    "agent_id": {
+                        "type": "integer",
+                        "description": "Filter by assigned agent ID",
+                    },
+                    "asset_id": {
+                        "type": "integer",
+                        "description": "Filter by linked asset ID",
+                    },
+                    "opened_after": {
+                        "type": "string",
+                        "description": "Only tickets opened after this date (ISO format, e.g. '2025-01-01')",
+                    },
+                    "opened_before": {
+                        "type": "string",
+                        "description": "Only tickets opened before this date (ISO format)",
+                    },
+                    "last_updated_after": {
+                        "type": "string",
+                        "description": "Only tickets last updated after this date (ISO format)",
+                    },
+                    "last_updated_before": {
+                        "type": "string",
+                        "description": "Only tickets last updated before this date (ISO format)",
+                    },
+                    "count": {
+                        "type": "integer",
+                        "description": "Maximum results to return (default 25, max 100)",
+                    },
+                },
+            },
+        },
+        {
+            "name": "batch_close_tickets",
+            "description": (
+                "Close multiple tickets at once with a shared closure note. "
+                "Use this when you need to close several related or stale tickets. "
+                "Returns a summary showing which tickets were successfully closed and any failures."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "ticket_ids": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "Array of ticket IDs to close",
+                    },
+                    "note": {
+                        "type": "string",
+                        "description": "Closure note applied to all tickets (private by default)",
+                    },
+                },
+                "required": ["ticket_ids"],
+            },
+        },
+        {
+            "name": "get_client_users",
+            "description": (
+                "List users belonging to a client/company. By default returns only active users. "
+                "Set include_inactive to true to also see departed/disabled employees. "
+                "The active/inactive status in the response indicates whether a user is current."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "client_id": {
+                        "type": "integer",
+                        "description": "The client/company ID",
+                    },
+                    "include_active": {
+                        "type": "boolean",
+                        "description": "Include active users (default: true)",
+                    },
+                    "include_inactive": {
+                        "type": "boolean",
+                        "description": "Include inactive/departed users (default: false)",
+                    },
+                    "search": {
+                        "type": "string",
+                        "description": "Text search filter (name, email, etc.)",
+                    },
+                    "count": {
+                        "type": "integer",
+                        "description": "Maximum results to return (default: 50)",
+                    },
+                },
+                "required": ["client_id"],
+            },
+        },
+        {
+            "name": "search_assets",
+            "description": (
+                "Search for assets/devices in Halo PSA by name, hostname, or other text. "
+                "Optionally filter by client/company. Returns asset summaries including "
+                "name, type, client, and status."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "search": {
+                        "type": "string",
+                        "description": "Text search (asset name, hostname, etc.)",
+                    },
+                    "client_id": {
+                        "type": "integer",
+                        "description": "Filter by client/company ID",
+                    },
+                    "count": {
+                        "type": "integer",
+                        "description": "Maximum results to return (default: 50)",
+                    },
+                },
+            },
+        },
+        {
+            "name": "get_related_tickets",
+            "description": (
+                "Get tickets that are linked/related to a specific ticket. "
+                "Use this to find associated issues, parent/child relationships, "
+                "or tickets that have been manually linked together."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "ticket_id": {
+                        "type": "integer",
+                        "description": "The ticket ID to find related tickets for",
+                    },
+                },
+                "required": ["ticket_id"],
+            },
+        },
     ]

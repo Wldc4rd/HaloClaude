@@ -223,3 +223,27 @@ class NinjaClient:
         """
         logger.debug(f"Fetching Windows services for NinjaRMM device {device_id}")
         return await self._request("GET", f"v2/device/{device_id}/windows-services")
+
+    async def search_devices(
+        self,
+        query: str,
+        limit: int = 25,
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for devices by name, logged-on user, IP address, etc.
+
+        Args:
+            query: Search query (hostname, username, IP, etc.)
+            limit: Maximum number of results to return (default 25)
+
+        Returns:
+            List of matching device summaries
+        """
+        logger.debug(f"Searching NinjaRMM devices: {query}")
+        result = await self._request("GET", "v2/devices/search", params={
+            "q": query,
+            "limit": limit,
+        })
+        devices = result if isinstance(result, list) else result.get("devices", [])
+        logger.info(f"NinjaRMM device search returned {len(devices)} results")
+        return devices

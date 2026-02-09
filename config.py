@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     # Proxy
     litellm_master_key: str
 
+    # Azure Entra ID OAuth (for MCP remote access from Claude.ai/mobile)
+    entra_tenant_id: Optional[str] = None
+    entra_client_id: Optional[str] = None
+    public_base_url: str = "https://haloclaude-proxy.ashysky-0dacd66d.westus.azurecontainerapps.io"
+
     # Application
     log_level: str = "INFO"
 

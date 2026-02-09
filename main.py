@@ -18,7 +18,6 @@ from halo.client import HaloClient
 from halo.tools import get_halo_tools
 from agent.executor import AgentExecutor
 from mcp_server import mcp, set_halo_client
-from mcp_server.auth import MCPAuthMiddleware
 
 # Configure logging
 settings = get_settings()
@@ -106,10 +105,135 @@ app = FastAPI(
 )
 
 # Add MCP authentication middleware
-app.add_middleware(MCPAuthMiddleware)
+if settings.entra_tenant_id and settings.entra_client_id:
+    # Entra ID OAuth active — FastMCP handles token validation via BearerAuthBackend.
+    # This middleware only normalizes api-key headers for backward compat.
+    from mcp_server.auth import ApiKeyHeaderMiddleware
+    app.add_middleware(ApiKeyHeaderMiddleware)
+else:
+    # No Entra ID — use legacy static-key middleware
+    from mcp_server.auth import MCPAuthMiddleware
+    app.add_middleware(MCPAuthMiddleware)
 
-# Mount MCP server at /mcp
-app.mount("/mcp", mcp.streamable_http_app())
+# Mount MCP server. Starlette redirects /mcp → /mcp/ (307) but some MCP
+# clients don't follow redirects, so a middleware rewrites the path.
+_mcp_app = mcp.streamable_http_app()
+app.mount("/mcp", _mcp_app)
+
+
+@app.middleware("http")
+async def rewrite_mcp_trailing_slash(request: Request, call_next):
+    """Rewrite /mcp to /mcp/ to avoid Starlette's 307 redirect."""
+    if request.url.path == "/mcp":
+        request.scope["path"] = "/mcp/"
+    return await call_next(request)
+
+
+@app.get("/.well-known/oauth-protected-resource/mcp")
+@app.get("/.well-known/oauth-protected-resource")
+async def oauth_protected_resource_metadata():
+    """RFC 9728 Protected Resource Metadata for the MCP endpoint."""
+    if not settings.entra_tenant_id or not settings.entra_client_id:
+        raise HTTPException(status_code=404, detail="OAuth not configured")
+
+    return {
+        "resource": f"api://{settings.entra_client_id}",
+        "authorization_servers": [
+            f"https://login.microsoftonline.com/{settings.entra_tenant_id}/v2.0"
+        ],
+        "bearer_methods_supported": ["header"],
+        "scopes_supported": [
+            f"api://{settings.entra_client_id}/MCP.Access",
+        ],
+    }
+
+
+@app.get("/.well-known/oauth-authorization-server")
+async def oauth_authorization_server_metadata():
+    """Proxy Entra ID's OAuth authorization server metadata.
+
+    Claude (March 2025 spec) expects this on the MCP server itself.
+    We fetch and return Entra ID's OpenID Connect metadata, remapping
+    field names to match RFC 8414 where needed.
+    """
+    if not settings.entra_tenant_id:
+        raise HTTPException(status_code=404, detail="OAuth not configured")
+
+    import httpx
+    entra_url = (
+        f"https://login.microsoftonline.com/{settings.entra_tenant_id}/v2.0"
+        f"/.well-known/openid-configuration"
+    )
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(entra_url)
+        resp.raise_for_status()
+        metadata = resp.json()
+
+    # Rewrite authorization and token endpoints to point to our proxies.
+    # This ensures our scope-rewriting logic runs, so Claude requests
+    # our app's scope instead of defaulting to Microsoft Graph.
+    base = settings.public_base_url.rstrip("/")
+    metadata["authorization_endpoint"] = f"{base}/authorize"
+    metadata["token_endpoint"] = f"{base}/token"
+    return metadata
+
+
+@app.get("/authorize")
+async def oauth_authorize_redirect(request: Request):
+    """Redirect to Entra ID's authorization endpoint.
+
+    Claude (March 2025 spec) sends the authorize request to the MCP server.
+    We redirect to Entra ID, rewriting the scope from 'claudeai' to the
+    actual Entra resource scope.
+    """
+    from starlette.responses import RedirectResponse
+
+    if not settings.entra_tenant_id or not settings.entra_client_id:
+        raise HTTPException(status_code=404, detail="OAuth not configured")
+
+    # Build Entra authorize URL with the original query params
+    params = dict(request.query_params)
+
+    # Claude sends scope=claudeai — replace with our actual scope
+    scope = params.get("scope", "")
+    if "claudeai" in scope or not scope:
+        params["scope"] = f"api://{settings.entra_client_id}/MCP.Access offline_access openid"
+
+    from urllib.parse import urlencode
+    entra_authorize = (
+        f"https://login.microsoftonline.com/{settings.entra_tenant_id}/oauth2/v2.0/authorize"
+        f"?{urlencode(params)}"
+    )
+    return RedirectResponse(url=entra_authorize, status_code=302)
+
+
+@app.post("/token")
+async def oauth_token_proxy(request: Request):
+    """Proxy token requests to Entra ID.
+
+    Claude sends the token exchange to the MCP server (March 2025 spec).
+    We forward it to Entra ID's token endpoint.
+    """
+    if not settings.entra_tenant_id:
+        raise HTTPException(status_code=404, detail="OAuth not configured")
+
+    import httpx
+    form_data = await request.form()
+    params = dict(form_data)
+
+    # Ensure scope is set for the token exchange
+    if "scope" not in params or "claudeai" in params.get("scope", ""):
+        params["scope"] = f"api://{settings.entra_client_id}/MCP.Access offline_access openid"
+
+    entra_token_url = (
+        f"https://login.microsoftonline.com/{settings.entra_tenant_id}/oauth2/v2.0/token"
+    )
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(entra_token_url, data=params)
+        resp_json = resp.json()
+        if resp.status_code != 200:
+            logger.warning(f"Token proxy: Entra error status={resp.status_code}")
+        return JSONResponse(status_code=resp.status_code, content=resp_json)
 
 
 @app.get("/")

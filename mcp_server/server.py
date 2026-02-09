@@ -11,9 +11,30 @@ from typing import Any, Dict, List, Optional
 from mcp.server.fastmcp import FastMCP
 from mcp.server.streamable_http import TransportSecuritySettings
 
+from config import get_settings
 from halo.client import HaloClient
 
 logger = logging.getLogger(__name__)
+
+# Build auth configuration if Entra ID is configured
+_settings = get_settings()
+_auth_settings = None
+_token_verifier = None
+
+if _settings.entra_tenant_id and _settings.entra_client_id:
+    from mcp.server.auth.settings import AuthSettings
+    from mcp_server.auth import EntraTokenVerifier
+
+    _auth_settings = AuthSettings(
+        issuer_url=f"https://login.microsoftonline.com/{_settings.entra_tenant_id}/v2.0",
+        resource_server_url=f"{_settings.public_base_url}/mcp",
+    )
+    _token_verifier = EntraTokenVerifier(
+        tenant_id=_settings.entra_tenant_id,
+        client_id=_settings.entra_client_id,
+        static_key=_settings.litellm_master_key,
+    )
+    logger.info("MCP OAuth: Entra ID authentication enabled")
 
 # Create the FastMCP server instance
 # stateless_http=True enables remote HTTP connections
@@ -21,6 +42,9 @@ logger = logging.getLogger(__name__)
 mcp = FastMCP(
     name="HaloClaude",
     stateless_http=True,
+    streamable_http_path="/",
+    auth=_auth_settings,
+    token_verifier=_token_verifier,
     transport_security=TransportSecuritySettings(
         enable_dns_rebinding_protection=False,
     ),

@@ -405,3 +405,42 @@ class CippClient:
             "POST", "api/ExecEditMailboxPermissions",
             json_body=body,
         )
+
+    async def offboard_user(
+        self,
+        tenant_filter: str,
+        user_id: str,
+        options: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Offboard a user via the CIPP Offboarding Wizard API.
+
+        Performs multiple offboarding actions in a single call.
+
+        Args:
+            tenant_filter: Tenant domain
+            user_id: User UPN (e.g., user@domain.com)
+            options: Offboarding options dict. Boolean flags:
+                ConvertToShared, HideFromGAL, DeleteUser, DisableSignIn,
+                ResetPass, RevokeSessions, RemoveGroups, RemoveLicenses,
+                RemoveRules, RemoveMobile, RemoveMFADevices,
+                removeCalendarInvites, removePermissions, ClearImmutableId,
+                disableForwarding.
+                Array fields (each item is {"value": "<UPN>"}):
+                AccessAutomap, AccessNoAutomap, OnedriveAccess.
+                String fields: OOO (out-of-office message).
+                Object fields: forward ({"value": "<UPN>"}).
+
+        Returns:
+            Results from each offboarding action
+        """
+        logger.info(f"CIPP: Offboarding user {user_id} in {tenant_filter}")
+        body: Dict[str, Any] = {
+            "tenantFilter": tenant_filter,
+            "user": {"value": user_id},
+        }
+        body.update(options)
+        return await self._request(
+            "POST", "api/ExecOffboardUser",
+            json_body=body,
+        )

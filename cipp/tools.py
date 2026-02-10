@@ -348,6 +348,49 @@ _WRITE_TOOLS: List[Dict[str, Any]] = [
             "required": ["tenant_filter", "user_id", "permissions"],
         },
     },
+    {
+        "name": "cipp_offboard_user",
+        "description": (
+            "Offboard a user in Microsoft 365 via CIPP's Offboarding Wizard. "
+            "Performs multiple offboarding actions in one call. Set boolean flags "
+            "in the options object to enable each action. "
+            "Boolean options: ConvertToShared (convert mailbox to shared), "
+            "HideFromGAL (hide from Global Address List), DeleteUser (delete the account), "
+            "DisableSignIn, ResetPass, RevokeSessions, RemoveGroups, RemoveLicenses, "
+            "RemoveRules, RemoveMobile, RemoveMFADevices, removeCalendarInvites, "
+            "removePermissions, ClearImmutableId, disableForwarding. "
+            "Array options (each item is {\"value\": \"user@domain.com\"}): "
+            "AccessAutomap (grant full mailbox access WITH automapping), "
+            "AccessNoAutomap (grant full mailbox access WITHOUT automapping), "
+            "OnedriveAccess (grant OneDrive access). "
+            "String options: OOO (set out-of-office message). "
+            "Object options: forward ({\"value\": \"user@domain.com\"} to set forwarding)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "tenant_filter": {
+                    "type": "string",
+                    "description": "Tenant domain (e.g., contoso.onmicrosoft.com)",
+                },
+                "user_id": {
+                    "type": "string",
+                    "description": "User UPN to offboard (e.g., user@domain.com)",
+                },
+                "options": {
+                    "type": "object",
+                    "description": (
+                        "Offboarding options. Example: "
+                        "{\"ConvertToShared\": true, \"HideFromGAL\": true, "
+                        "\"DeleteUser\": true, "
+                        "\"AccessAutomap\": [{\"value\": \"delegate@domain.com\"}], "
+                        "\"OnedriveAccess\": [{\"value\": \"delegate@domain.com\"}]}"
+                    ),
+                },
+            },
+            "required": ["tenant_filter", "user_id", "options"],
+        },
+    },
 ]
 
 

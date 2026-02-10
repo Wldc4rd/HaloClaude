@@ -579,6 +579,15 @@ class AgentExecutor:
                     tool_input["permissions"],
                 )
 
+            elif tool_name == "cipp_offboard_user":
+                if not self.cipp_client:
+                    return {"error": "CIPP integration is not enabled"}
+                return await self.cipp_client.offboard_user(
+                    tool_input["tenant_filter"],
+                    tool_input["user_id"],
+                    tool_input["options"],
+                )
+
             else:
                 return {"error": f"Unknown tool: {tool_name}"}
 

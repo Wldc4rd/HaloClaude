@@ -315,3 +315,28 @@ async def cipp_edit_mailbox_permissions(
     logger.info(f"MCP: cipp_edit_mailbox_permissions called for {user_id} in {tenant_filter}")
     client = get_cipp_client()
     return await client.edit_mailbox_permissions(tenant_filter, user_id, permissions)
+
+
+@mcp.tool(
+    description="Offboard a user in Microsoft 365 via CIPP's Offboarding Wizard. "
+    "Performs multiple actions in one call: ConvertToShared, HideFromGAL, DeleteUser, "
+    "DisableSignIn, ResetPass, RevokeSessions, RemoveGroups, RemoveLicenses, "
+    "AccessAutomap/AccessNoAutomap (array of {value: UPN}), "
+    "OnedriveAccess (array of {value: UPN}), OOO (string), forward ({value: UPN})."
+)
+async def cipp_offboard_user(
+    tenant_filter: str,
+    user_id: str,
+    options: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Offboard a user via CIPP Offboarding Wizard.
+
+    Args:
+        tenant_filter: Tenant domain (e.g., contoso.onmicrosoft.com)
+        user_id: User UPN to offboard (e.g., user@domain.com)
+        options: Offboarding options dict with boolean flags and array fields
+    """
+    logger.info(f"MCP: cipp_offboard_user called for {user_id} in {tenant_filter}")
+    client = get_cipp_client()
+    return await client.offboard_user(tenant_filter, user_id, options)

@@ -732,7 +732,7 @@ Community repository and release management.
 
 ## HaloClaude Integration
 
-Of these endpoints, HaloClaude currently integrates **16 tools** (12 read-only + 4 write).
+Of these endpoints, HaloClaude currently integrates **17 tools** (12 read-only + 5 write).
 See `cipp/tools.py` for the full tool definitions.
 
 ### Read-only (proxy + MCP + triage)
@@ -758,3 +758,4 @@ See `cipp/tools.py` for the full tool definitions.
 | `api/ExecDisableUser` | `cipp_disable_user` |
 | `api/ExecDeviceAction` | `cipp_device_action` |
 | `api/ExecEditMailboxPermissions` | `cipp_edit_mailbox_permissions` |
+| `api/ExecOffboardUser` | `cipp_offboard_user` |

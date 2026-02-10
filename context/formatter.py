@@ -53,7 +53,12 @@ class ContextFormatter:
             "The SOPs below are guidelines for when you ARE writing client-facing responses.\n\n"
             "**CRITICAL: When writing emails or responses, you MUST reference and incorporate "
             "the TICKET HISTORY below. This contains the actual conversation and work done on this ticket. "
-            "Your response should directly relate to and build upon the recent actions and notes.**"
+            "Your response should directly relate to and build upon the recent actions and notes.**\n\n"
+            "**APPOINTMENT BOOKING: When writing emails where it would be helpful for the client to "
+            "schedule time with us (e.g. for remote sessions, on-site visits, or follow-up calls), "
+            "include the variable $APPOINTMENTBOOKING in your response. Halo will automatically replace "
+            "this with a personalised booking link for the ticket's assigned technician. Use it naturally, "
+            'e.g. "You can book a time that works for you here: $APPOINTMENTBOOKING".**'
         )
 
         # Order: background info first, then ticket history last (Claude pays more attention to recent context)

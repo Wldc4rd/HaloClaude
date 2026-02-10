@@ -64,6 +64,20 @@ async def lifespan(app: FastAPI):
         set_mesh_client(app.state.mesh_client)
         logger.info("Mesh Email Security integration enabled")
 
+    # Initialize CIPP client if enabled
+    app.state.cipp_client = None
+    if settings.cipp_enabled:
+        from cipp import CippClient, set_cipp_client
+        app.state.cipp_client = CippClient(
+            base_url=settings.cipp_api_url,
+            tenant_id=settings.cipp_tenant_id,
+            client_id=settings.cipp_client_id,
+            client_secret=settings.cipp_client_secret,
+            application_id=settings.cipp_application_id,
+        )
+        set_cipp_client(app.state.cipp_client)
+        logger.info("CIPP integration enabled")
+
     app.state.translator = AzureOpenAITranslator()
     app.state.message_fixer = MessageFixer()
     app.state.agent_executor = AgentExecutor(
@@ -79,6 +93,7 @@ async def lifespan(app: FastAPI):
         max_contract_doc_length=settings.max_contract_doc_length,
         ninja_client=app.state.ninja_client,
         mesh_client=app.state.mesh_client,
+        cipp_client=app.state.cipp_client,
     )
 
     # Set up MCP server with shared HaloClient
@@ -89,6 +104,8 @@ async def lifespan(app: FastAPI):
         yield
 
     # Cleanup
+    if app.state.cipp_client:
+        await app.state.cipp_client.close()
     if app.state.mesh_client:
         await app.state.mesh_client.close()
     if app.state.ninja_client:
@@ -277,7 +294,10 @@ async def chat_completions(
         if request.app.state.mesh_client:
             from mesh import get_mesh_tools
             tools = tools + get_mesh_tools()
-        
+        if request.app.state.cipp_client:
+            from cipp import get_cipp_tools
+            tools = tools + get_cipp_tools()
+
         # Execute agent loop (handles tool calls)
         response = await request.app.state.agent_executor.run(
             messages=messages,
@@ -387,6 +407,7 @@ async def _run_triage_background(ticket_id: int, app: FastAPI):
             max_sop_article_length=settings.max_sop_article_length,
             max_contract_doc_length=settings.max_contract_doc_length,
             mesh_client=app.state.mesh_client,
+            cipp_client=app.state.cipp_client,
         )
         logger.info(f"Triage pipeline complete for ticket {ticket_id}: {result}")
     except Exception as e:

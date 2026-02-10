@@ -17,6 +17,7 @@ from context.injector import ContextInjector
 if TYPE_CHECKING:
     from ninja.client import NinjaClient
     from mesh.client import MeshClient
+    from cipp.client import CippClient
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,7 @@ class AgentExecutor:
         max_contract_doc_length: int = 5000,
         ninja_client: Optional["NinjaClient"] = None,
         mesh_client: Optional["MeshClient"] = None,
+        cipp_client: Optional["CippClient"] = None,
     ):
         """
         Initialize the agent executor.
@@ -57,10 +59,12 @@ class AgentExecutor:
             max_contract_doc_length: Max characters of extracted PDF text per contract
             ninja_client: Optional NinjaRMM client for device data tools
             mesh_client: Optional Mesh Email Security client for email log tools
+            cipp_client: Optional CIPP client for M365 multi-tenant tools
         """
         self.halo_client = halo_client
         self.ninja_client = ninja_client
         self.mesh_client = mesh_client
+        self.cipp_client = cipp_client
         self.model = model
         self.client = anthropic.AsyncAnthropic(api_key=anthropic_api_key)
         self.context_injector = ContextInjector(
@@ -472,6 +476,107 @@ class AgentExecutor:
                     return {"error": "Mesh Email Security integration is not enabled"}
                 return await self.mesh_client.search_customers(
                     filter_term=tool_input["filter_term"],
+                )
+
+            # CIPP tools
+            elif tool_name == "cipp_list_tenants":
+                if not self.cipp_client:
+                    return {"error": "CIPP integration is not enabled"}
+                return await self.cipp_client.list_tenants()
+
+            elif tool_name == "cipp_list_users":
+                if not self.cipp_client:
+                    return {"error": "CIPP integration is not enabled"}
+                return await self.cipp_client.list_users(tool_input["tenant_filter"])
+
+            elif tool_name == "cipp_list_groups":
+                if not self.cipp_client:
+                    return {"error": "CIPP integration is not enabled"}
+                return await self.cipp_client.list_groups(tool_input["tenant_filter"])
+
+            elif tool_name == "cipp_list_user_groups":
+                if not self.cipp_client:
+                    return {"error": "CIPP integration is not enabled"}
+                return await self.cipp_client.list_user_groups(
+                    tool_input["tenant_filter"], tool_input["user_id"],
+                )
+
+            elif tool_name == "cipp_list_mailboxes":
+                if not self.cipp_client:
+                    return {"error": "CIPP integration is not enabled"}
+                return await self.cipp_client.list_mailboxes(tool_input["tenant_filter"])
+
+            elif tool_name == "cipp_list_mailbox_permissions":
+                if not self.cipp_client:
+                    return {"error": "CIPP integration is not enabled"}
+                return await self.cipp_client.list_mailbox_permissions(
+                    tool_input["tenant_filter"], tool_input["user_id"],
+                )
+
+            elif tool_name == "cipp_list_mailbox_rules":
+                if not self.cipp_client:
+                    return {"error": "CIPP integration is not enabled"}
+                return await self.cipp_client.list_mailbox_rules(
+                    tool_input["tenant_filter"], tool_input["user_id"],
+                )
+
+            elif tool_name == "cipp_list_devices":
+                if not self.cipp_client:
+                    return {"error": "CIPP integration is not enabled"}
+                return await self.cipp_client.list_devices(tool_input["tenant_filter"])
+
+            elif tool_name == "cipp_list_licenses":
+                if not self.cipp_client:
+                    return {"error": "CIPP integration is not enabled"}
+                return await self.cipp_client.list_licenses(tool_input["tenant_filter"])
+
+            elif tool_name == "cipp_list_sign_ins":
+                if not self.cipp_client:
+                    return {"error": "CIPP integration is not enabled"}
+                return await self.cipp_client.list_sign_ins(tool_input["tenant_filter"])
+
+            elif tool_name == "cipp_list_defender_state":
+                if not self.cipp_client:
+                    return {"error": "CIPP integration is not enabled"}
+                return await self.cipp_client.list_defender_state(tool_input["tenant_filter"])
+
+            elif tool_name == "cipp_list_conditional_access_policies":
+                if not self.cipp_client:
+                    return {"error": "CIPP integration is not enabled"}
+                return await self.cipp_client.list_conditional_access_policies(
+                    tool_input["tenant_filter"],
+                )
+
+            elif tool_name == "cipp_reset_password":
+                if not self.cipp_client:
+                    return {"error": "CIPP integration is not enabled"}
+                return await self.cipp_client.reset_password(
+                    tool_input["tenant_filter"], tool_input["user_id"],
+                )
+
+            elif tool_name == "cipp_disable_user":
+                if not self.cipp_client:
+                    return {"error": "CIPP integration is not enabled"}
+                return await self.cipp_client.disable_user(
+                    tool_input["tenant_filter"], tool_input["user_id"],
+                )
+
+            elif tool_name == "cipp_device_action":
+                if not self.cipp_client:
+                    return {"error": "CIPP integration is not enabled"}
+                return await self.cipp_client.device_action(
+                    tool_input["tenant_filter"],
+                    tool_input["device_id"],
+                    tool_input["action"],
+                )
+
+            elif tool_name == "cipp_edit_mailbox_permissions":
+                if not self.cipp_client:
+                    return {"error": "CIPP integration is not enabled"}
+                return await self.cipp_client.edit_mailbox_permissions(
+                    tool_input["tenant_filter"],
+                    tool_input["user_id"],
+                    tool_input["permissions"],
                 )
 
             else:

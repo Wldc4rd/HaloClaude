@@ -60,6 +60,7 @@ async def run_triage_pipeline(
     max_sop_article_length: int = 2000,
     max_contract_doc_length: int = 5000,
     mesh_client: Optional[Any] = None,
+    cipp_client: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """
     Run the full triage pipeline for a ticket.
@@ -225,7 +226,7 @@ async def run_triage_pipeline(
         try:
             await _stage3_technical_triage(
                 client, model, halo_client, ninja_client, mesh_client,
-                ticket_id, context, formatted_context, triage,
+                cipp_client, ticket_id, context, formatted_context, triage,
             )
             result["stages_completed"].append("technical_triage")
             result["route"] = "technical"
@@ -708,6 +709,7 @@ async def _stage3_technical_triage(
     halo_client: HaloClient,
     ninja_client: Optional[Any],
     mesh_client: Optional[Any],
+    cipp_client: Optional[Any],
     ticket_id: int,
     context: ContextData,
     formatted_context: str,
@@ -731,7 +733,7 @@ async def _stage3_technical_triage(
     logger.info(f"Assigned ticket {ticket_id} to {agent_name} (agent_id={agent_id})")
 
     # Build tool list (read-only tools only)
-    tools = _get_triage_tools(mesh_client=mesh_client)
+    tools = _get_triage_tools(mesh_client=mesh_client, cipp_client=cipp_client)
 
     system = TECHNICAL_TRIAGE_SYSTEM_PROMPT + "\n\n" + formatted_context
 
@@ -783,6 +785,7 @@ async def _stage3_technical_triage(
             for tc in tool_calls:
                 tool_result = await _execute_triage_tool(
                     tc.name, tc.input, halo_client, ninja_client, mesh_client,
+                    cipp_client,
                 )
                 tool_results.append({
                     "type": "tool_result",
@@ -890,6 +893,7 @@ async def _execute_triage_tool(
     halo_client: HaloClient,
     ninja_client: Optional[Any],
     mesh_client: Optional[Any] = None,
+    cipp_client: Optional[Any] = None,
 ) -> Any:
     """
     Execute a read-only tool for technical triage analysis.
@@ -981,6 +985,36 @@ async def _execute_triage_tool(
             if handler:
                 return await handler()
             return {"error": f"Unknown ninja tool: {tool_name}"}
+
+        # CIPP read-only tools
+        elif tool_name.startswith("cipp_") and cipp_client:
+            method_map = {
+                "cipp_list_tenants": lambda: cipp_client.list_tenants(),
+                "cipp_list_users": lambda: cipp_client.list_users(tool_input["tenant_filter"]),
+                "cipp_list_groups": lambda: cipp_client.list_groups(tool_input["tenant_filter"]),
+                "cipp_list_user_groups": lambda: cipp_client.list_user_groups(
+                    tool_input["tenant_filter"], tool_input["user_id"],
+                ),
+                "cipp_list_mailboxes": lambda: cipp_client.list_mailboxes(tool_input["tenant_filter"]),
+                "cipp_list_mailbox_permissions": lambda: cipp_client.list_mailbox_permissions(
+                    tool_input["tenant_filter"], tool_input["user_id"],
+                ),
+                "cipp_list_mailbox_rules": lambda: cipp_client.list_mailbox_rules(
+                    tool_input["tenant_filter"], tool_input["user_id"],
+                ),
+                "cipp_list_devices": lambda: cipp_client.list_devices(tool_input["tenant_filter"]),
+                "cipp_list_licenses": lambda: cipp_client.list_licenses(tool_input["tenant_filter"]),
+                "cipp_list_sign_ins": lambda: cipp_client.list_sign_ins(tool_input["tenant_filter"]),
+                "cipp_list_defender_state": lambda: cipp_client.list_defender_state(tool_input["tenant_filter"]),
+                "cipp_list_conditional_access_policies": lambda: cipp_client.list_conditional_access_policies(
+                    tool_input["tenant_filter"],
+                ),
+            }
+            handler = method_map.get(tool_name)
+            if handler:
+                return await handler()
+            return {"error": f"Unknown or write-only CIPP tool in triage: {tool_name}"}
+
         else:
             return {"error": f"Tool not available in triage: {tool_name}"}
     except Exception as e:
@@ -988,7 +1022,10 @@ async def _execute_triage_tool(
         return {"error": str(e)}
 
 
-def _get_triage_tools(mesh_client: Optional[Any] = None) -> List[Dict[str, Any]]:
+def _get_triage_tools(
+    mesh_client: Optional[Any] = None,
+    cipp_client: Optional[Any] = None,
+) -> List[Dict[str, Any]]:
     """
     Get the read-only tool definitions for technical triage.
 
@@ -1020,6 +1057,14 @@ def _get_triage_tools(mesh_client: Optional[Any] = None) -> List[Dict[str, Any]]
         try:
             from mesh.tools import get_mesh_tools
             tools.extend(get_mesh_tools())
+        except ImportError:
+            pass
+
+    # Add CIPP read-only tools
+    if cipp_client:
+        try:
+            from cipp.tools import get_cipp_read_tools
+            tools.extend(get_cipp_read_tools())
         except ImportError:
             pass
 

@@ -29,7 +29,7 @@ Custom FastAPI proxy deployed on Azure Container Apps:
 1. Receives Azure OpenAI format requests from Halo PSA
 2. Fixes message format issues (empty content, assistant endings)
 3. Translates to Claude API format
-4. Injects Halo API tool definitions + NinjaRMM tools (when enabled)
+4. Injects Halo API tool definitions + NinjaRMM, Mesh, and CIPP tools (when enabled)
 5. Context injection: fetches ticket data, assets, contracts, SOPs, and live NinjaRMM device data
 6. Executes agentic tool loop until Claude provides final response
 7. Translates response back to Azure OpenAI format
@@ -50,6 +50,18 @@ When `MESH_ENABLED=true`, the system:
 - Uses static API key authentication (no OAuth)
 - API reference: `docs/mesh-api-index.md`
 - OpenAPI spec (partial): `docs/Mesh-API-v1.json`
+
+### CIPP Integration
+
+When `CIPP_ENABLED=true`, the system:
+- **Provides 16 on-demand tools** (prefixed `cipp_`) for Microsoft 365 multi-tenant management via CIPP
+- **12 read-only tools**: list tenants, users, groups, mailboxes, permissions, rules, devices, licenses, sign-ins, Defender state, CA policies
+- **4 write tools**: reset password, disable user, device actions, edit mailbox permissions
+- **Exposes MCP tools** on the same `/mcp` endpoint for use with Claude Desktop
+- Uses OAuth2 Client Credentials flow via Azure AD for authentication
+- Triage pipeline uses read-only CIPP tools only (write tools excluded)
+- Tenant resolution: uses `azure_tenant_domain` from Halo client records
+- API reference: `docs/CIPP/api-endpoints.md`
 
 ## Halo PSA Context
 
@@ -116,6 +128,10 @@ Key endpoints we'll use:
 - `mesh/client.py` - Mesh Email Security API client
 - `mesh/tools.py` - Claude tool definitions for Mesh
 - `mesh/mcp_tools.py` - MCP tool registrations for Mesh (Claude Desktop)
+- `cipp/auth.py` - CIPP OAuth2 token management via Azure AD
+- `cipp/client.py` - CIPP API client for M365 multi-tenant management
+- `cipp/tools.py` - Claude tool definitions for CIPP
+- `cipp/mcp_tools.py` - MCP tool registrations for CIPP (Claude Desktop)
 - `triage/pipeline.py` - Multi-stage ticket triage pipeline
 - `triage/prompts.py` - System prompt templates for triage stages
 
@@ -139,6 +155,14 @@ NINJA_CLIENT_SECRET=xxx           # NinjaRMM OAuth client secret
 MESH_ENABLED=true                 # Enable Mesh integration
 MESH_API_URL=https://hub-us.emailsecurity.app  # Mesh API URL
 MESH_API_KEY=xxx                  # Mesh API key
+
+# CIPP (optional)
+CIPP_ENABLED=true                 # Enable CIPP integration
+CIPP_API_URL=https://your-cipp.azurewebsites.net  # CIPP instance URL
+CIPP_CLIENT_ID=xxx                # Azure AD app client ID
+CIPP_CLIENT_SECRET=xxx            # Azure AD app client secret
+CIPP_TENANT_ID=xxx                # Azure AD tenant ID
+CIPP_APPLICATION_ID=xxx           # CIPP app registration ID (defaults to CLIENT_ID)
 
 # Triage pipeline
 TRIAGE_ENABLED=true               # Enable triage webhook endpoint

@@ -57,6 +57,14 @@ class Settings(BaseSettings):
     mesh_api_url: str = "https://hub-us.emailsecurity.app"
     mesh_api_key: Optional[str] = None
 
+    # CIPP (CyberDrain Improved Partner Portal)
+    cipp_enabled: bool = False
+    cipp_api_url: Optional[str] = None
+    cipp_client_id: Optional[str] = None
+    cipp_client_secret: Optional[str] = None
+    cipp_tenant_id: Optional[str] = None
+    cipp_application_id: Optional[str] = None  # Defaults to cipp_client_id if not set
+
     model_config = ConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

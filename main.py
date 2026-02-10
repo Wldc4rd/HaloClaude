@@ -386,6 +386,7 @@ async def _run_triage_background(ticket_id: int, app: FastAPI):
             max_sop_articles=settings.max_sop_articles,
             max_sop_article_length=settings.max_sop_article_length,
             max_contract_doc_length=settings.max_contract_doc_length,
+            mesh_client=app.state.mesh_client,
         )
         logger.info(f"Triage pipeline complete for ticket {ticket_id}: {result}")
     except Exception as e:

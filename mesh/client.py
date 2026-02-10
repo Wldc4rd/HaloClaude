@@ -175,6 +175,64 @@ class MeshClient:
             params={"queue_id": queue_id},
         )
 
+    async def get_email_by_message_id(
+        self,
+        message_id: str,
+        direction: str = "inbound",
+    ) -> Dict[str, Any]:
+        """
+        Look up an email by its message UUID and return its details + event trace.
+
+        Searches email logs by message_id, then fetches the event trace for the
+        matching email. Returns both the email metadata and events in one call.
+
+        Args:
+            message_id: The message UUID (e.g. "4b60e4ca-0a81-4464-a996-5b45e49f0bc6")
+            direction: "inbound" or "outbound" (default "inbound")
+
+        Returns:
+            Dict with "email" (log entry) and "events" (event trace) keys,
+            or an error dict if not found.
+        """
+        logger.info(f"Looking up Mesh email by message_id={message_id}")
+
+        # Search for the email by message_id (extend time range to 30 days)
+        now = datetime.now(timezone.utc)
+        results = await self.search_email_logs(
+            direction=direction,
+            message_id=message_id,
+            start=(now - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%S"),
+            end=now.strftime("%Y-%m-%dT%H:%M:%S"),
+            size=1,
+        )
+
+        # Extract the email record from results
+        emails = []
+        if isinstance(results, dict):
+            emails = results.get("data", results.get("results", []))
+        elif isinstance(results, list):
+            emails = results
+
+        if not emails:
+            logger.info(f"No email found for message_id={message_id}")
+            return {"error": f"No email found with message_id {message_id}"}
+
+        email = emails[0]
+        queue_id = email.get("queue_id") or email.get("id")
+
+        if not queue_id:
+            logger.warning(f"Email found but no queue_id in response for {message_id}")
+            return {"email": email, "events": None}
+
+        # Fetch event trace
+        try:
+            events = await self.get_email_log_events(int(queue_id))
+        except Exception as e:
+            logger.warning(f"Failed to fetch events for queue_id={queue_id}: {e}")
+            return {"email": email, "events": None, "events_error": str(e)}
+
+        return {"email": email, "events": events}
+
     # ──────────────────────────────────────────────
     # Customer endpoints
     # ──────────────────────────────────────────────

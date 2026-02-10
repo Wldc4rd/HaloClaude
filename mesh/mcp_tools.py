@@ -105,6 +105,30 @@ async def mesh_get_email_events(queue_id: int) -> Any:
 
 
 @mcp.tool(
+    description="Look up a specific email in Mesh Email Security by its message UUID/ID. "
+    "Returns both the email metadata and full event trace in one call. "
+    "Use this when you have a message ID from a quarantine alert or email notification."
+)
+async def mesh_get_email_by_id(
+    message_id: str,
+    direction: str = "inbound",
+) -> Any:
+    """
+    Look up an email by its message UUID and return details + events.
+
+    Args:
+        message_id: The message UUID/ID to look up
+        direction: "inbound" or "outbound" (default "inbound")
+    """
+    logger.info(f"MCP: mesh_get_email_by_id called with message_id={message_id}")
+    client = get_mesh_client()
+    return await client.get_email_by_message_id(
+        message_id=message_id,
+        direction=direction,
+    )
+
+
+@mcp.tool(
     description="Search Mesh Email Security customers by company name or email domain."
 )
 async def mesh_search_customers(filter_term: str) -> Any:

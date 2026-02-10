@@ -2,9 +2,11 @@
 Ticket Triage Pipeline
 
 Sequential multi-stage pipeline that triages a new ticket:
+0. User/Client Resolution - identifies and links user/client for unlinked tickets
 1. Triage Agent - classifies client/contract situation
 2a. Sales Path - creates opportunity if no contract/prepaid time
 2b. Contract Enrichment - generates contract notes if missing
+2c. Asset Auto-Assignment - links user's workstation to ticket
 3. Technical Triage - assigns technician and writes analysis note
 """
 
@@ -57,6 +59,7 @@ async def run_triage_pipeline(
     max_sop_articles: int = 10,
     max_sop_article_length: int = 2000,
     max_contract_doc_length: int = 5000,
+    mesh_client: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """
     Run the full triage pipeline for a ticket.
@@ -94,6 +97,44 @@ async def run_triage_pipeline(
         return result
 
     formatted_context = formatter.format(context)
+
+    # ========================================
+    # STAGE 0: User/Client Resolution
+    # ========================================
+    from .user_matcher import is_system_user
+    needs_user_resolution = (
+        not context.user
+        or not context.client
+        or is_system_user(context.user)
+    )
+    if needs_user_resolution:
+        try:
+            resolution = await _stage0_resolve_user_or_client(
+                halo_client, ticket_id, context, fetcher, formatter
+            )
+            if resolution:
+                result["stages_completed"].append("user_resolution")
+                if resolution.get("user"):
+                    result["resolved_user"] = {
+                        "id": resolution["user"].get("id"),
+                        "name": resolution["user"].get("name"),
+                    }
+                if resolution.get("client_id"):
+                    result["resolved_client_id"] = resolution["client_id"]
+                if resolution.get("asset"):
+                    result["resolved_asset"] = {
+                        "id": resolution["asset"].get("id"),
+                        "name": (
+                            resolution["asset"].get("inventory_number")
+                            or resolution["asset"].get("key_field", "")
+                        ),
+                    }
+                # Context was re-fetched inside the stage function
+                formatted_context = formatter.format(context)
+        except Exception as e:
+            logger.warning(f"User/client resolution failed for ticket {ticket_id}: {e}")
+            result["errors"].append(f"User/client resolution failed: {e}")
+            # Non-fatal, continue pipeline
 
     # ========================================
     # STAGE 1: Triage Classification
@@ -183,8 +224,8 @@ async def run_triage_pipeline(
     if triage.route == "technical":
         try:
             await _stage3_technical_triage(
-                client, model, halo_client, ninja_client,
-                ticket_id, context, formatted_context,
+                client, model, halo_client, ninja_client, mesh_client,
+                ticket_id, context, formatted_context, triage,
             )
             result["stages_completed"].append("technical_triage")
             result["route"] = "technical"
@@ -199,6 +240,52 @@ async def run_triage_pipeline(
 # =============================================================================
 # Stage Implementations
 # =============================================================================
+
+
+async def _stage0_resolve_user_or_client(
+    halo_client: HaloClient,
+    ticket_id: int,
+    context: ContextData,
+    fetcher: ContextFetcher,
+    formatter: ContextFormatter,
+) -> Optional[Dict[str, Any]]:
+    """
+    Stage 0: Identify and link user/client for unlinked tickets.
+
+    Parses ticket content for email addresses and device hostnames,
+    searches Halo for matches, and links the ticket. After linking,
+    re-fetches the full context so downstream stages have correct data.
+    """
+    from .user_matcher import find_and_link_user_or_client
+
+    resolution = await find_and_link_user_or_client(
+        ticket_id=ticket_id,
+        ticket=context.ticket,
+        actions=context.actions,
+        halo_client=halo_client,
+    )
+
+    if not resolution:
+        return None
+
+    # Re-fetch full context now that user/client are linked
+    logger.info(f"Re-fetching context for ticket {ticket_id} after user/client resolution")
+    new_context = await fetcher.fetch_full_context(ticket_id)
+
+    # Update the context object in-place so the caller sees the changes
+    context.ticket = new_context.ticket
+    context.actions = new_context.actions
+    context.user = new_context.user
+    context.client = new_context.client
+    context.assets = new_context.assets
+    context.contracts = new_context.contracts
+    context.contract_doc_texts = new_context.contract_doc_texts
+    context.sop_articles = new_context.sop_articles
+    context.ninja_devices = new_context.ninja_devices
+    context.related_tickets = new_context.related_tickets
+    context.errors = new_context.errors
+
+    return resolution
 
 
 async def _stage1_triage(
@@ -248,14 +335,12 @@ async def _stage1_triage(
     )
 
     # Determine route based on decision logic (Python, not Claude)
+    # Sales path: only for clients with NO active contract at all.
+    # Clients with an active contract always go to technical — even if
+    # prepaid time is exhausted, purchasing more credits is handled in
+    # the support ticket, not via a separate sales opportunity.
     if not triage.has_active_contract:
         triage.route = "sales"
-    elif not triage.has_prepaid_time:
-        # No prepaid time — check if the work is covered by a service we provide
-        if triage.work_covered_by_managed:
-            triage.route = "technical"
-        else:
-            triage.route = "sales"
     else:
         triage.route = "technical"
 
@@ -622,9 +707,11 @@ async def _stage3_technical_triage(
     model: str,
     halo_client: HaloClient,
     ninja_client: Optional[Any],
+    mesh_client: Optional[Any],
     ticket_id: int,
     context: ContextData,
     formatted_context: str,
+    triage: Optional[TriageResult] = None,
 ) -> None:
     """Stage 3: Assign technician and write technical analysis note."""
     # Determine agent assignment based on client's top_level_id
@@ -644,18 +731,31 @@ async def _stage3_technical_triage(
     logger.info(f"Assigned ticket {ticket_id} to {agent_name} (agent_id={agent_id})")
 
     # Build tool list (read-only tools only)
-    tools = _get_triage_tools()
+    tools = _get_triage_tools(mesh_client=mesh_client)
 
     system = TECHNICAL_TRIAGE_SYSTEM_PROMPT + "\n\n" + formatted_context
 
+    # Build user message with optional billing context
+    user_content = (
+        "Perform a thorough technical analysis of this ticket. "
+        "Use tools to search for similar past tickets, relevant KB articles, "
+        "and device data if applicable. Then provide your analysis as a "
+        "structured note following the format in your instructions."
+    )
+
+    # Add billing note when prepaid time is exhausted and work isn't covered
+    if triage and not triage.has_prepaid_time and not triage.work_covered_by_managed:
+        user_content += (
+            "\n\nBILLING NOTE: This client's prepaid time balance is exhausted "
+            f"({triage.prepaid_balance}h remaining) and this work is not covered "
+            "by their managed services agreement. Include a billing note in your "
+            "analysis advising the technician that additional prepaid time may "
+            "need to be purchased before or during this engagement."
+        )
+
     messages: List[Dict[str, Any]] = [{
         "role": "user",
-        "content": (
-            "Perform a thorough technical analysis of this ticket. "
-            "Use tools to search for similar past tickets, relevant KB articles, "
-            "and device data if applicable. Then provide your analysis as a "
-            "structured note following the format in your instructions."
-        ),
+        "content": user_content,
     }]
 
     # Agentic tool loop (same pattern as AgentExecutor.run)
@@ -682,7 +782,7 @@ async def _stage3_technical_triage(
             tool_results = []
             for tc in tool_calls:
                 tool_result = await _execute_triage_tool(
-                    tc.name, tc.input, halo_client, ninja_client,
+                    tc.name, tc.input, halo_client, ninja_client, mesh_client,
                 )
                 tool_results.append({
                     "type": "tool_result",
@@ -789,6 +889,7 @@ async def _execute_triage_tool(
     tool_input: Dict[str, Any],
     halo_client: HaloClient,
     ninja_client: Optional[Any],
+    mesh_client: Optional[Any] = None,
 ) -> Any:
     """
     Execute a read-only tool for technical triage analysis.
@@ -833,6 +934,35 @@ async def _execute_triage_tool(
                 priority_id=tool_input["priority_id"],
                 sla_id=tool_input.get("sla_id"),
             )
+        # Mesh Email Security read-only tools
+        elif tool_name.startswith("mesh_") and mesh_client:
+            if tool_name == "mesh_search_email_logs":
+                return await mesh_client.search_email_logs(
+                    direction=tool_input.get("direction", "inbound"),
+                    from_addr=tool_input.get("from_addr"),
+                    to_addr=tool_input.get("to_addr"),
+                    subject=tool_input.get("subject"),
+                    status=tool_input.get("status"),
+                    verdict=tool_input.get("verdict"),
+                    start=tool_input.get("start"),
+                    end=tool_input.get("end"),
+                    sender_ip=tool_input.get("sender_ip"),
+                    message_id=tool_input.get("message_id"),
+                    size=tool_input.get("size", 50),
+                )
+            elif tool_name == "mesh_get_email_by_id":
+                return await mesh_client.get_email_by_message_id(
+                    message_id=tool_input["message_id"],
+                    direction=tool_input.get("direction", "inbound"),
+                )
+            elif tool_name == "mesh_get_email_events":
+                return await mesh_client.get_email_log_events(tool_input["queue_id"])
+            elif tool_name == "mesh_search_customers":
+                return await mesh_client.search_customers(
+                    filter_term=tool_input["filter_term"],
+                )
+            return {"error": f"Unknown mesh tool: {tool_name}"}
+
         # NinjaRMM read-only tools
         elif tool_name.startswith("ninja_") and ninja_client:
             method_map = {
@@ -858,7 +988,7 @@ async def _execute_triage_tool(
         return {"error": str(e)}
 
 
-def _get_triage_tools() -> List[Dict[str, Any]]:
+def _get_triage_tools(mesh_client: Optional[Any] = None) -> List[Dict[str, Any]]:
     """
     Get the read-only tool definitions for technical triage.
 
@@ -884,5 +1014,13 @@ def _get_triage_tools() -> List[Dict[str, Any]]:
         tools.extend(get_ninja_tools())
     except ImportError:
         pass
+
+    # Add Mesh Email Security tools (all read-only)
+    if mesh_client:
+        try:
+            from mesh.tools import get_mesh_tools
+            tools.extend(get_mesh_tools())
+        except ImportError:
+            pass
 
     return tools

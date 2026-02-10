@@ -244,6 +244,8 @@ class HaloClient:
         status_id: Optional[int] = None,
         asset_id: Optional[int] = None,
         sla_id: Optional[int] = None,
+        user_id: Optional[int] = None,
+        client_id: Optional[int] = None,
     ) -> Any:
         """
         Update an existing ticket.
@@ -260,6 +262,8 @@ class HaloClient:
             team_id: New assigned team ID
             status_id: New status ID
             sla_id: New SLA ID
+            user_id: New reporting user ID
+            client_id: New client/company ID
 
         Returns:
             Updated ticket details
@@ -288,6 +292,10 @@ class HaloClient:
             ticket["asset_id"] = asset_id
         if sla_id is not None:
             ticket["sla_id"] = sla_id
+        if user_id is not None:
+            ticket["user_id"] = user_id
+        if client_id is not None:
+            ticket["client_id"] = client_id
         return await self._request("POST", "tickets", json=[ticket])
 
     async def batch_close_tickets(
@@ -566,6 +574,35 @@ class HaloClient:
         if isinstance(users, dict):
             users = [users]
         logger.info(f"Fetched {len(users)} users for client {client_id}")
+        return users
+
+    async def search_users(
+        self,
+        search: str,
+        count: int = 10,
+    ) -> List[Dict[str, Any]]:
+        """
+        Search all users across all clients by name or email.
+
+        Args:
+            search: Text search filter (name, email, etc.)
+            count: Maximum results to return (default 10)
+
+        Returns:
+            List of matching user records
+        """
+        params: Dict[str, Any] = {
+            "search": search,
+            "count": count,
+            "includeactive": "true",
+        }
+
+        logger.debug(f"Searching users: {search}")
+        result = await self._request("GET", "Users", params=params)
+        users = result.get("users", []) if isinstance(result, dict) else result
+        if isinstance(users, dict):
+            users = [users]
+        logger.info(f"User search '{search}' returned {len(users)} results")
         return users
 
     # =========================================================================

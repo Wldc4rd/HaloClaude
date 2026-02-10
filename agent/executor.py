@@ -459,6 +459,14 @@ class AgentExecutor:
                     return {"error": "Mesh Email Security integration is not enabled"}
                 return await self.mesh_client.get_email_log_events(tool_input["queue_id"])
 
+            elif tool_name == "mesh_get_email_by_id":
+                if not self.mesh_client:
+                    return {"error": "Mesh Email Security integration is not enabled"}
+                return await self.mesh_client.get_email_by_message_id(
+                    message_id=tool_input["message_id"],
+                    direction=tool_input.get("direction", "inbound"),
+                )
+
             elif tool_name == "mesh_search_customers":
                 if not self.mesh_client:
                     return {"error": "Mesh Email Security integration is not enabled"}

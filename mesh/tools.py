@@ -103,6 +103,33 @@ def get_mesh_tools() -> List[Dict[str, Any]]:
             },
         },
         {
+            "name": "mesh_get_email_by_id",
+            "description": (
+                "Look up a specific email in Mesh Email Security by its message UUID/ID "
+                "and return both the email metadata and full event trace in one call. "
+                "Use this when you have a message ID (UUID) from a quarantine alert or "
+                "email notification and need the full details and processing history."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "message_id": {
+                        "type": "string",
+                        "description": (
+                            "The message UUID/ID to look up "
+                            "(e.g. '4b60e4ca-0a81-4464-a996-5b45e49f0bc6')"
+                        ),
+                    },
+                    "direction": {
+                        "type": "string",
+                        "enum": ["inbound", "outbound"],
+                        "description": "Email direction (default 'inbound')",
+                    },
+                },
+                "required": ["message_id"],
+            },
+        },
+        {
             "name": "mesh_search_customers",
             "description": (
                 "Search Mesh Email Security customers by company name or email domain. "

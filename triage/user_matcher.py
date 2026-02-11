@@ -346,7 +346,7 @@ async def find_and_link_user_or_client(
             f"{ticket_id}: {hostnames[:5]}"
         )
         result = await _try_hostnames_and_link(
-            ticket_id, hostnames, halo_client, ninja_client
+            ticket_id, hostnames, halo_client, ninja_client, ticket_text=text
         )
         if result:
             return result
@@ -366,7 +366,7 @@ async def find_and_link_user_or_client(
                 )
                 if asset:
                     return await _link_hostname_match(
-                        ticket_id, token, asset, halo_client
+                        ticket_id, token, asset, halo_client, text
                     )
 
     # === Strategy 4: AI hostname extraction (final fallback) ===
@@ -384,7 +384,7 @@ async def find_and_link_user_or_client(
                 )
                 if asset:
                     return await _link_hostname_match(
-                        ticket_id, ai_hostname, asset, halo_client
+                        ticket_id, ai_hostname, asset, halo_client, text
                     )
 
     logger.info(f"User/client resolution: no match found for ticket {ticket_id}")
@@ -396,13 +396,14 @@ async def _try_hostnames_and_link(
     hostnames: List[str],
     halo_client: HaloClient,
     ninja_client: Optional[Any],
+    ticket_text: str = "",
 ) -> Optional[Dict[str, Any]]:
     """Try a list of hostname candidates against Halo/NinjaRMM and link."""
     for hostname in hostnames:
         asset = await _try_hostname_match(hostname, halo_client, ninja_client)
         if asset:
             return await _link_hostname_match(
-                ticket_id, hostname, asset, halo_client
+                ticket_id, hostname, asset, halo_client, ticket_text
             )
     return None
 
@@ -412,8 +413,13 @@ async def _link_hostname_match(
     hostname: str,
     asset: Dict[str, Any],
     halo_client: HaloClient,
+    ticket_text: str = "",
 ) -> Optional[Dict[str, Any]]:
-    """Link a matched asset to the ticket and return the resolution dict."""
+    """Link a matched asset to the ticket and return the resolution dict.
+
+    Also attempts to resolve the correct user under the asset's client
+    so that tickets from vendor accounts (e.g. Zorus) get the real user set.
+    """
     asset_id = asset.get("id")
     client_id = _extract_client_id_from_asset(asset)
     asset_name = (
@@ -428,13 +434,71 @@ async def _link_hostname_match(
     )
 
     if client_id:
-        await halo_client.update_ticket(
-            ticket_id=ticket_id, client_id=client_id
+        # Try to resolve the correct user under this client
+        resolved_user = await _try_resolve_user_for_client(
+            client_id, ticket_text, halo_client
         )
+
+        update_kwargs: Dict[str, Any] = {"client_id": client_id}
+        if resolved_user:
+            update_kwargs["user_id"] = resolved_user.get("id")
+            logger.info(
+                f"Resolved user for client {client_id}: "
+                f"{resolved_user.get('name')} (id={resolved_user.get('id')})"
+            )
+
+        await halo_client.update_ticket(ticket_id=ticket_id, **update_kwargs)
         await halo_client.link_asset_to_ticket(
             ticket_id=ticket_id, asset_id=asset_id
         )
-        return {"asset": asset, "client_id": client_id}
+
+        result: Dict[str, Any] = {"asset": asset, "client_id": client_id}
+        if resolved_user:
+            result["user"] = resolved_user
+        return result
+
+    return None
+
+
+async def _try_resolve_user_for_client(
+    client_id: int,
+    ticket_text: str,
+    halo_client: HaloClient,
+) -> Optional[Dict[str, Any]]:
+    """Try to find the correct user under a client.
+
+    If the client has a single active non-system user, returns them directly.
+    If multiple users exist, matches by name appearing in the ticket text.
+    """
+    try:
+        users = await halo_client.get_client_users(client_id, count=20)
+    except Exception as e:
+        logger.warning(f"Failed to get users for client {client_id}: {e}")
+        return None
+
+    if not users:
+        return None
+
+    # Filter to active, non-system users
+    real_users = [
+        u for u in users
+        if not u.get("inactive") and not is_system_user(u)
+    ]
+
+    if not real_users:
+        return None
+
+    # Single user → use them
+    if len(real_users) == 1:
+        return real_users[0]
+
+    # Multiple users → try name matching against ticket text
+    if ticket_text:
+        text_lower = ticket_text.lower()
+        for user in real_users:
+            name = (user.get("name") or "").strip()
+            if name and len(name) > 2 and name.lower() in text_lower:
+                return user
 
     return None
 

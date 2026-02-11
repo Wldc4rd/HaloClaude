@@ -141,51 +141,68 @@ async def run_triage_pipeline(
             # Non-fatal, continue pipeline
 
     # ========================================
-    # STAGE 1: Triage Classification
+    # Check for Leif IT clients — bypass triage/contract/sales checks
     # ========================================
-    try:
-        triage = await _stage1_triage(client, model, context, formatted_context)
-        result["stages_completed"].append("triage")
-        result["triage"] = {
-            "client_type": triage.client_type,
-            "has_active_contract": triage.has_active_contract,
-            "has_prepaid_time": triage.has_prepaid_time,
-            "prepaid_balance": triage.prepaid_balance,
-            "route": triage.route,
-            "reasoning": triage.reasoning,
-        }
-    except Exception as e:
-        logger.exception(f"Stage 1 triage failed for ticket {ticket_id}: {e}")
-        result["errors"].append(f"Triage failed: {e}")
-        # Write failure note to ticket so the team knows
-        try:
-            await halo_client.create_ticket_note(
-                ticket_id=ticket_id,
-                note=f"<b>Triage Pipeline Error</b><br>Stage 1 classification failed: {e}",
-                hiddenfromuser=True,
-            )
-        except Exception:
-            pass
-        return result
+    is_leif_it = False
+    if context.client:
+        is_leif_it = context.client.get("top_level_id") == JUSTIN_TOP_LEVEL_ID
 
-    # ========================================
-    # STAGE 2b: Contract Enrichment (if needed)
-    # ========================================
-    # Check all active contracts — Stage 2b will evaluate note quality
-    contracts_to_check = _find_active_contracts(context.contracts)
-    if contracts_to_check:
+    triage = None
+
+    if is_leif_it:
+        logger.info(
+            f"Leif IT client detected for ticket {ticket_id}, "
+            f"routing directly to Justin (agent {JUSTIN_AGENT_ID})"
+        )
+        result["stages_completed"].append("leif_it_routing")
+        result["route"] = "technical"
+    else:
+        # ========================================
+        # STAGE 1: Triage Classification
+        # ========================================
         try:
-            await _stage2b_enrich_contracts(
-                client, model, halo_client, context, contracts_to_check
-            )
-            result["stages_completed"].append("contract_enrichment")
+            triage = await _stage1_triage(client, model, context, formatted_context)
+            result["stages_completed"].append("triage")
+            result["triage"] = {
+                "client_type": triage.client_type,
+                "has_active_contract": triage.has_active_contract,
+                "has_prepaid_time": triage.has_prepaid_time,
+                "prepaid_balance": triage.prepaid_balance,
+                "route": triage.route,
+                "reasoning": triage.reasoning,
+            }
         except Exception as e:
-            logger.warning(f"Contract enrichment failed: {e}")
-            result["errors"].append(f"Contract enrichment failed: {e}")
-            # Non-fatal, continue pipeline
+            logger.exception(f"Stage 1 triage failed for ticket {ticket_id}: {e}")
+            result["errors"].append(f"Triage failed: {e}")
+            # Write failure note to ticket so the team knows
+            try:
+                await halo_client.create_ticket_note(
+                    ticket_id=ticket_id,
+                    note=f"<b>Triage Pipeline Error</b><br>Stage 1 classification failed: {e}",
+                    hiddenfromuser=True,
+                )
+            except Exception:
+                pass
+            return result
+
+        # ========================================
+        # STAGE 2b: Contract Enrichment (if needed)
+        # ========================================
+        # Check all active contracts — Stage 2b will evaluate note quality
+        contracts_to_check = _find_active_contracts(context.contracts)
+        if contracts_to_check:
+            try:
+                await _stage2b_enrich_contracts(
+                    client, model, halo_client, context, contracts_to_check
+                )
+                result["stages_completed"].append("contract_enrichment")
+            except Exception as e:
+                logger.warning(f"Contract enrichment failed: {e}")
+                result["errors"].append(f"Contract enrichment failed: {e}")
+                # Non-fatal, continue pipeline
 
     # ========================================
-    # STAGE 2c: Asset Auto-Assignment
+    # STAGE 2c: Asset Auto-Assignment (runs for all clients)
     # ========================================
     if not context.assets:
         try:
@@ -210,9 +227,9 @@ async def run_triage_pipeline(
             # Non-fatal, continue pipeline
 
     # ========================================
-    # STAGE 2a: Sales Path
+    # STAGE 2a: Sales Path (skipped for Leif IT)
     # ========================================
-    if triage.route == "sales":
+    if triage and triage.route == "sales":
         try:
             await _stage2a_sales_path(halo_client, ticket_id, context, triage)
             result["stages_completed"].append("sales_path")
@@ -226,7 +243,7 @@ async def run_triage_pipeline(
     # ========================================
     # STAGE 3: Technical Triage
     # ========================================
-    if triage.route == "technical":
+    if is_leif_it or (triage and triage.route == "technical"):
         try:
             await _stage3_technical_triage(
                 client, model, halo_client, ninja_client, mesh_client,

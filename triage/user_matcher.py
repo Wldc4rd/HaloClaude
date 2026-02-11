@@ -436,7 +436,7 @@ async def _link_hostname_match(
     if client_id:
         # Try to resolve the correct user under this client
         resolved_user = await _try_resolve_user_for_client(
-            client_id, ticket_text, halo_client
+            client_id, ticket_text, halo_client, asset=asset
         )
 
         update_kwargs: Dict[str, Any] = {"client_id": client_id}
@@ -464,11 +464,14 @@ async def _try_resolve_user_for_client(
     client_id: int,
     ticket_text: str,
     halo_client: HaloClient,
+    asset: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     """Try to find the correct user under a client.
 
-    If the client has a single active non-system user, returns them directly.
-    If multiple users exist, matches by name appearing in the ticket text.
+    Resolution order:
+      1. Single active non-system user → use them directly.
+      2. Name from ticket text appears in user list.
+      3. Asset's username or last-logged-in-user matches a user.
     """
     try:
         users = await halo_client.get_client_users(client_id, count=20)
@@ -499,6 +502,38 @@ async def _try_resolve_user_for_client(
             name = (user.get("name") or "").strip()
             if name and len(name) > 2 and name.lower() in text_lower:
                 return user
+
+    # Try matching from the asset's username or last-logged-in-user fields
+    if asset:
+        asset_usernames = set()
+
+        # Direct username field on the asset
+        username = (asset.get("username") or "").strip()
+        if username:
+            asset_usernames.add(username.lower())
+
+        # Check asset custom fields for "Last Logged In User"
+        for field in asset.get("fields", []):
+            if field.get("name") in ("Last Logged In User", "last_logged_in_user"):
+                value = (field.get("value") or "").strip()
+                if value:
+                    # Strip domain prefix (DOMAIN\user or AzureAD\user)
+                    if "\\" in value:
+                        value = value.split("\\", 1)[1]
+                    asset_usernames.add(value.lower())
+
+        if asset_usernames:
+            from .asset_matcher import _name_matches_user
+            for user in real_users:
+                user_name = (user.get("name") or "").strip()
+                user_email = user.get("emailaddress")
+                for device_user in asset_usernames:
+                    if _name_matches_user(device_user, user_name, user_email):
+                        logger.info(
+                            f"User resolved via asset username: "
+                            f"'{device_user}' matches '{user_name}'"
+                        )
+                        return user
 
     return None
 

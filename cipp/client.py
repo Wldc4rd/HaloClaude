@@ -108,7 +108,14 @@ class CippClient:
             )
 
         response.raise_for_status()
-        return response.json()
+        data = response.json()
+
+        # CIPP sometimes wraps list results in {"Metadata": ..., "Results": [...]}
+        # Unwrap to return just the list for consistent handling.
+        if isinstance(data, dict) and "Results" in data:
+            return data["Results"]
+
+        return data
 
     # ──────────────────────────────────────────────
     # Read-only endpoints
@@ -261,21 +268,95 @@ class CippClient:
             params={"TenantFilter": tenant_filter},
         )
 
-    async def list_sign_ins(self, tenant_filter: str) -> List[Dict[str, Any]]:
+    async def list_sign_ins(
+        self,
+        tenant_filter: str,
+        user_id: Optional[str] = None,
+        top: Optional[int] = None,
+        days: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
         """
-        List recent sign-in logs for a tenant.
+        List recent sign-in logs for a tenant or specific user.
 
         Args:
             tenant_filter: Tenant domain
+            user_id: Optional UPN to get sign-ins for a specific user
+                     (uses ListUserSigninLogs endpoint)
+            top: Optional limit on number of results returned
+            days: Optional limit to sign-ins from the last N days
 
         Returns:
             List of sign-in log entries
         """
-        logger.debug(f"Fetching CIPP sign-in logs for tenant {tenant_filter}")
-        return await self._request(
-            "GET", "api/ListSignIns",
-            params={"TenantFilter": tenant_filter},
-        )
+        if user_id:
+            # Determine if user_id is a UPN (contains @) or a GUID
+            is_upn = "@" in user_id
+
+            if is_upn:
+                # Use tenant-wide endpoint with OData filter on UPN
+                # (ListUserSigninLogs requires a GUID, not a UPN)
+                logger.debug(
+                    f"Fetching CIPP sign-in logs for UPN {user_id} in {tenant_filter}"
+                )
+                filters = [f"userPrincipalName eq '{user_id}'"]
+                if days:
+                    from datetime import datetime, timedelta, timezone
+                    cutoff = (
+                        datetime.now(timezone.utc) - timedelta(days=days)
+                    ).strftime("%Y-%m-%dT%H:%M:%SZ")
+                    filters.append(f"createdDateTime ge {cutoff}")
+                params: Dict[str, Any] = {
+                    "TenantFilter": tenant_filter,
+                    "$filter": " and ".join(filters),
+                }
+                if top:
+                    params["$top"] = top
+                result = await self._request(
+                    "GET", "api/ListSignIns", params=params,
+                )
+            else:
+                # GUID — use the per-user endpoint directly
+                logger.debug(
+                    f"Fetching CIPP sign-in logs for user {user_id} in {tenant_filter}"
+                )
+                params = {
+                    "TenantFilter": tenant_filter,
+                    "userId": user_id,
+                }
+                if top:
+                    params["$top"] = top
+                if days:
+                    from datetime import datetime, timedelta, timezone
+                    cutoff = (
+                        datetime.now(timezone.utc) - timedelta(days=days)
+                    ).strftime("%Y-%m-%dT%H:%M:%SZ")
+                    params["$filter"] = f"createdDateTime ge {cutoff}"
+                result = await self._request(
+                    "GET", "api/ListUserSigninLogs", params=params,
+                )
+        else:
+            # Tenant-wide endpoint
+            logger.debug(
+                f"Fetching CIPP sign-in logs for tenant {tenant_filter}"
+            )
+            params = {"TenantFilter": tenant_filter}
+            if top:
+                params["$top"] = top
+            if days:
+                from datetime import datetime, timedelta, timezone
+                cutoff = (
+                    datetime.now(timezone.utc) - timedelta(days=days)
+                ).strftime("%Y-%m-%dT%H:%M:%SZ")
+                params["$filter"] = f"createdDateTime ge {cutoff}"
+            result = await self._request(
+                "GET", "api/ListSignIns", params=params,
+            )
+
+        # Client-side top limit as fallback if API didn't honour $top
+        if top and isinstance(result, list) and len(result) > top:
+            result = result[:top]
+
+        return result
 
     async def list_defender_state(self, tenant_filter: str) -> List[Dict[str, Any]]:
         """

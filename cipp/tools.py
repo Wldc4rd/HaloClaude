@@ -186,7 +186,9 @@ _READ_TOOLS: List[Dict[str, Any]] = [
             "List recent sign-in logs for a Microsoft 365 tenant via CIPP. "
             "Shows user sign-in activity including success/failure, location, "
             "device info, and conditional access results. Useful for security "
-            "investigations and troubleshooting login issues."
+            "investigations and troubleshooting login issues. "
+            "IMPORTANT: Always provide user_id and/or top to avoid very large responses. "
+            "Without filters this returns ALL tenant sign-ins which can be enormous."
         ),
         "input_schema": {
             "type": "object",
@@ -194,6 +196,27 @@ _READ_TOOLS: List[Dict[str, Any]] = [
                 "tenant_filter": {
                     "type": "string",
                     "description": "Tenant domain (e.g., contoso.onmicrosoft.com)",
+                },
+                "user_id": {
+                    "type": "string",
+                    "description": (
+                        "Optional: User UPN (e.g., user@domain.com) to get "
+                        "sign-ins for a specific user only"
+                    ),
+                },
+                "top": {
+                    "type": "integer",
+                    "description": (
+                        "Optional: Maximum number of sign-in entries to return "
+                        "(e.g., 50). Highly recommended to avoid large responses."
+                    ),
+                },
+                "days": {
+                    "type": "integer",
+                    "description": (
+                        "Optional: Only return sign-ins from the last N days "
+                        "(e.g., 7 for the past week)"
+                    ),
                 },
             },
             "required": ["tenant_filter"],

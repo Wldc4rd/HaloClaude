@@ -111,7 +111,10 @@ async def run_triage_pipeline(
     if needs_user_resolution:
         try:
             resolution = await _stage0_resolve_user_or_client(
-                halo_client, ticket_id, context, fetcher, formatter
+                halo_client, ticket_id, context, fetcher, formatter,
+                ninja_client=ninja_client,
+                anthropic_client=client,
+                model=model,
             )
             if resolution:
                 result["stages_completed"].append("user_resolution")
@@ -187,7 +190,8 @@ async def run_triage_pipeline(
     if not context.assets:
         try:
             matched_asset = await _stage2c_auto_assign_asset(
-                halo_client, ninja_client, ticket_id, context, fetcher
+                halo_client, ninja_client, ticket_id, context, fetcher,
+                anthropic_client=client, model=model,
             )
             if matched_asset:
                 result["stages_completed"].append("asset_auto_assign")
@@ -249,6 +253,9 @@ async def _stage0_resolve_user_or_client(
     context: ContextData,
     fetcher: ContextFetcher,
     formatter: ContextFormatter,
+    ninja_client: Optional[Any] = None,
+    anthropic_client: Optional[Any] = None,
+    model: str = "claude-sonnet-4-5-20250929",
 ) -> Optional[Dict[str, Any]]:
     """
     Stage 0: Identify and link user/client for unlinked tickets.
@@ -264,6 +271,9 @@ async def _stage0_resolve_user_or_client(
         ticket=context.ticket,
         actions=context.actions,
         halo_client=halo_client,
+        ninja_client=ninja_client,
+        anthropic_client=anthropic_client,
+        model=model,
     )
 
     if not resolution:
@@ -423,16 +433,34 @@ async def _stage2c_auto_assign_asset(
     ticket_id: int,
     context: ContextData,
     fetcher: ContextFetcher,
+    anthropic_client: Optional[Any] = None,
+    model: str = "claude-sonnet-4-5-20250929",
 ) -> Optional[Dict[str, Any]]:
     """
-    Stage 2c: Auto-identify and link user's workstation to the ticket.
+    Stage 2c: Auto-identify and link a workstation to the ticket.
+
+    Strategies (in order):
+      1. User-based matching (assigned assets, NinjaRMM last user, name match)
+      2. Hostname from ticket text → Halo/NinjaRMM search
+      3. Broad all-caps tokens → NinjaRMM device search
+      4. AI hostname extraction → Halo/NinjaRMM search
 
     After linking, refreshes context.assets and context.ninja_devices
     so downstream stages have device data.
     """
     from .asset_matcher import find_and_link_workstation
+    from .user_matcher import (
+        _collect_ticket_text,
+        _extract_hostnames,
+        _extract_allcaps_tokens,
+        _try_hostname_match,
+        _try_ninja_hostname_search,
+        _ai_extract_hostname,
+    )
 
-    # Extract user info
+    matched_asset = None
+
+    # === Strategy 1: User-based workstation matching ===
     user_id = None
     user_name = ""
     user_email = None
@@ -441,27 +469,70 @@ async def _stage2c_auto_assign_asset(
         user_name = context.user.get("name", "")
         user_email = context.user.get("emailaddress")
 
-    if not user_id:
-        logger.info(f"Asset auto-assign skipped: no user on ticket {ticket_id}")
-        return None
-
-    # Extract client_id
     client_id = None
     if context.client:
         client_id = context.client.get("id")
-    if not client_id:
-        logger.info(f"Asset auto-assign skipped: no client on ticket {ticket_id}")
-        return None
 
-    matched_asset = await find_and_link_workstation(
-        ticket_id=ticket_id,
-        user_id=user_id,
-        user_name=user_name,
-        user_email=user_email,
-        client_id=client_id,
-        halo_client=halo_client,
-        ninja_client=ninja_client,
-    )
+    if user_id and client_id:
+        matched_asset = await find_and_link_workstation(
+            ticket_id=ticket_id,
+            user_id=user_id,
+            user_name=user_name,
+            user_email=user_email,
+            client_id=client_id,
+            halo_client=halo_client,
+            ninja_client=ninja_client,
+        )
+
+    # === Strategies 2-4: Hostname from ticket text ===
+    if not matched_asset:
+        text = _collect_ticket_text(context.ticket, context.actions)
+
+        # Strategy 2: Regex hostname extraction
+        hostnames = _extract_hostnames(text) if text else []
+        for hostname in hostnames:
+            asset = await _try_hostname_match(hostname, halo_client, ninja_client)
+            if asset:
+                from .asset_matcher import _link_asset_to_ticket
+                await _link_asset_to_ticket(
+                    ticket_id, asset, halo_client, "ticket_text_hostname"
+                )
+                matched_asset = asset
+                break
+
+        # Strategy 3: Broad all-caps tokens → NinjaRMM
+        if not matched_asset and ninja_client:
+            already_tried = set(hostnames)
+            caps_tokens = _extract_allcaps_tokens(text, exclude=already_tried)
+            for token in caps_tokens:
+                asset = await _try_ninja_hostname_search(
+                    token, token, halo_client, ninja_client
+                )
+                if asset:
+                    from .asset_matcher import _link_asset_to_ticket
+                    await _link_asset_to_ticket(
+                        ticket_id, asset, halo_client, "ninja_caps_token"
+                    )
+                    matched_asset = asset
+                    break
+
+        # Strategy 4: AI extraction
+        if not matched_asset and anthropic_client:
+            ai_hostname = await _ai_extract_hostname(
+                text, anthropic_client, model
+            )
+            if ai_hostname:
+                already_tried = set(hostnames)
+                if ai_hostname not in already_tried:
+                    asset = await _try_hostname_match(
+                        ai_hostname, halo_client, ninja_client
+                    )
+                    if asset:
+                        from .asset_matcher import _link_asset_to_ticket
+                        await _link_asset_to_ticket(
+                            ticket_id, asset, halo_client, "ai_extraction"
+                        )
+                        matched_asset = asset
 
     if matched_asset:
         # Update context so Stage 3 has the asset data
@@ -737,6 +808,7 @@ async def _stage3_technical_triage(
 
     system = TECHNICAL_TRIAGE_SYSTEM_PROMPT + "\n\n" + formatted_context
 
+
     # Build user message with optional billing context
     user_content = (
         "Perform a thorough technical analysis of this ticket. "
@@ -787,14 +859,25 @@ async def _stage3_technical_triage(
                     tc.name, tc.input, halo_client, ninja_client, mesh_client,
                     cipp_client,
                 )
+                serialized = (
+                    json.dumps(tool_result)
+                    if isinstance(tool_result, (dict, list))
+                    else str(tool_result)
+                )
+                if len(serialized) > 50_000:
+                    logger.warning(
+                        f"Tool result from {tc.name} truncated: "
+                        f"{len(serialized)} chars → 50000"
+                    )
+                    serialized = (
+                        serialized[:50_000]
+                        + f"\n\n... [TRUNCATED — response was {len(serialized):,} chars, "
+                        f"only first 50,000 shown]"
+                    )
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": tc.id,
-                    "content": (
-                        json.dumps(tool_result)
-                        if isinstance(tool_result, (dict, list))
-                        else str(tool_result)
-                    ),
+                    "content": serialized,
                 })
 
             messages.append({"role": "user", "content": tool_results})
@@ -1004,7 +1087,12 @@ async def _execute_triage_tool(
                 ),
                 "cipp_list_devices": lambda: cipp_client.list_devices(tool_input["tenant_filter"]),
                 "cipp_list_licenses": lambda: cipp_client.list_licenses(tool_input["tenant_filter"]),
-                "cipp_list_sign_ins": lambda: cipp_client.list_sign_ins(tool_input["tenant_filter"]),
+                "cipp_list_sign_ins": lambda: cipp_client.list_sign_ins(
+                    tenant_filter=tool_input["tenant_filter"],
+                    user_id=tool_input.get("user_id"),
+                    top=tool_input.get("top"),
+                    days=tool_input.get("days"),
+                ),
                 "cipp_list_defender_state": lambda: cipp_client.list_defender_state(tool_input["tenant_filter"]),
                 "cipp_list_conditional_access_policies": lambda: cipp_client.list_conditional_access_policies(
                     tool_input["tenant_filter"],

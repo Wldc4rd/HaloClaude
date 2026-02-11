@@ -14,6 +14,10 @@ import anthropic
 from halo.client import HaloClient
 from context.injector import ContextInjector
 
+# Maximum characters for a single tool result before truncation.
+# ~50K chars ≈ ~12K tokens, leaving plenty of room in the context window.
+MAX_TOOL_RESULT_CHARS = 50_000
+
 if TYPE_CHECKING:
     from ninja.client import NinjaClient
     from mesh.client import MeshClient
@@ -149,10 +153,21 @@ class AgentExecutor:
                         tool_call.name,
                         tool_call.input,
                     )
+                    serialized = json.dumps(result) if isinstance(result, (dict, list)) else str(result)
+                    if len(serialized) > MAX_TOOL_RESULT_CHARS:
+                        logger.warning(
+                            f"Tool result from {tool_call.name} truncated: "
+                            f"{len(serialized)} chars → {MAX_TOOL_RESULT_CHARS}"
+                        )
+                        serialized = (
+                            serialized[:MAX_TOOL_RESULT_CHARS]
+                            + f"\n\n... [TRUNCATED — response was {len(serialized):,} chars, "
+                            f"only first {MAX_TOOL_RESULT_CHARS:,} shown]"
+                        )
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": tool_call.id,
-                        "content": json.dumps(result) if isinstance(result, (dict, list)) else str(result),
+                        "content": serialized,
                     })
                 
                 # Add tool results to messages
@@ -533,7 +548,12 @@ class AgentExecutor:
             elif tool_name == "cipp_list_sign_ins":
                 if not self.cipp_client:
                     return {"error": "CIPP integration is not enabled"}
-                return await self.cipp_client.list_sign_ins(tool_input["tenant_filter"])
+                return await self.cipp_client.list_sign_ins(
+                    tenant_filter=tool_input["tenant_filter"],
+                    user_id=tool_input.get("user_id"),
+                    top=tool_input.get("top"),
+                    days=tool_input.get("days"),
+                )
 
             elif tool_name == "cipp_list_defender_state":
                 if not self.cipp_client:

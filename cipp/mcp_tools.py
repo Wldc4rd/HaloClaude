@@ -183,18 +183,32 @@ async def cipp_list_licenses(tenant_filter: str) -> List[Dict[str, Any]]:
 
 @mcp.tool(
     description="List recent sign-in logs for a Microsoft 365 tenant via CIPP. "
-    "Shows sign-in activity including success/failure, location, and device info."
+    "Shows sign-in activity including success/failure, location, and device info. "
+    "IMPORTANT: Always provide user_id and/or top to avoid very large responses."
 )
-async def cipp_list_sign_ins(tenant_filter: str) -> List[Dict[str, Any]]:
+async def cipp_list_sign_ins(
+    tenant_filter: str,
+    user_id: Optional[str] = None,
+    top: Optional[int] = None,
+    days: Optional[int] = None,
+) -> List[Dict[str, Any]]:
     """
-    List sign-in logs for a tenant.
+    List sign-in logs for a tenant or specific user.
 
     Args:
         tenant_filter: Tenant domain (e.g., contoso.onmicrosoft.com)
+        user_id: Optional UPN (e.g., user@domain.com) to filter to a specific user
+        top: Optional max number of results to return (e.g., 50)
+        days: Optional limit to sign-ins from the last N days (e.g., 7)
     """
-    logger.info(f"MCP: cipp_list_sign_ins called for {tenant_filter}")
+    logger.info(
+        f"MCP: cipp_list_sign_ins called for {tenant_filter} "
+        f"(user_id={user_id}, top={top}, days={days})"
+    )
     client = get_cipp_client()
-    return await client.list_sign_ins(tenant_filter)
+    return await client.list_sign_ins(
+        tenant_filter, user_id=user_id, top=top, days=days,
+    )
 
 
 @mcp.tool(

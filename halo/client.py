@@ -880,6 +880,7 @@ class HaloClient:
         client_id: Optional[int] = None,
         user_id: Optional[int] = None,
         search: Optional[str] = None,
+        inventory_number: Optional[str] = None,
         count: int = 50,
     ) -> List[Dict[str, Any]]:
         """
@@ -889,6 +890,7 @@ class HaloClient:
             client_id: Filter by client/company ID
             user_id: Filter by user ID (assets assigned to this user)
             search: Text search filter
+            inventory_number: Exact match on inventory_number (hostname)
             count: Maximum results to return
 
         Returns:
@@ -904,6 +906,8 @@ class HaloClient:
             params["user_id"] = user_id
         if search:
             params["search"] = search
+        if inventory_number:
+            params["inventory_number"] = inventory_number
 
         result = await self._request("GET", "Asset", params=params)
         # Halo may return {"assets": [...]} or a list directly

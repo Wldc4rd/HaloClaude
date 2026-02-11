@@ -99,7 +99,8 @@ class ContextFormatter:
 
         sections.append("=" * 60)
 
-        return "\n\n".join(sections)
+        result = "\n\n".join(sections)
+        return result
 
     def _format_recent_work_reminder(self, actions: List[Dict[str, Any]]) -> str:
         """

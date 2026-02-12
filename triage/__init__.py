@@ -1,5 +1,8 @@
-"""Ticket triage pipeline module."""
+"""Ticket pipeline module (triage + review)."""
 
-from .pipeline import run_triage_pipeline
+from .pipeline import run_ticket_pipeline
 
-__all__ = ["run_triage_pipeline"]
+# Backwards compatibility
+run_triage_pipeline = run_ticket_pipeline
+
+__all__ = ["run_ticket_pipeline", "run_triage_pipeline"]

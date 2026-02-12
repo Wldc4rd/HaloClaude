@@ -5,6 +5,7 @@ A proxy server that enables Halo PSA to use Claude AI for ticket responses,
 summaries, and AI-powered features with intelligent tool calling.
 """
 
+import asyncio
 import logging
 from fastapi import BackgroundTasks, FastAPI, Request, HTTPException, Header
 from fastapi.responses import JSONResponse
@@ -382,36 +383,88 @@ async def webhook_triage(
     logger.info(f"Triage webhook received for ticket {ticket_id}")
 
     background_tasks.add_task(
-        _run_triage_background,
+        _run_pipeline_background,
         ticket_id=ticket_id,
+        mode="triage",
         app=request.app,
     )
 
     return {"status": "accepted", "ticket_id": ticket_id}
 
 
-async def _run_triage_background(ticket_id: int, app: FastAPI):
-    """Background task wrapper for the triage pipeline."""
-    from triage import run_triage_pipeline
+@app.post("/webhook/review", status_code=202)
+async def webhook_review(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    api_key: str = Header(alias="api-key"),
+):
+    """
+    Trigger the review pipeline for a ticket.
+
+    Called by Halo runbooks (e.g. "no actions for X days") or on demand.
+    Runs asynchronously and writes results back to Halo.
+    """
+    if api_key != settings.litellm_master_key:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    if not settings.review_enabled:
+        raise HTTPException(status_code=503, detail="Review pipeline is disabled")
+
+    body = await request.json()
+    ticket_id = body.get("ticket_id")
+
+    if not ticket_id:
+        raise HTTPException(status_code=400, detail="ticket_id is required")
 
     try:
-        result = await run_triage_pipeline(
-            ticket_id=ticket_id,
-            halo_client=app.state.halo_client,
-            ninja_client=app.state.ninja_client,
-            anthropic_api_key=settings.anthropic_api_key,
-            model=settings.triage_model,
-            sop_kb_search_term=settings.sop_kb_search_term,
-            sop_kb_filter_tag=settings.sop_kb_filter_tag,
-            max_sop_articles=settings.max_sop_articles,
-            max_sop_article_length=settings.max_sop_article_length,
-            max_contract_doc_length=settings.max_contract_doc_length,
-            mesh_client=app.state.mesh_client,
-            cipp_client=app.state.cipp_client,
-        )
-        logger.info(f"Triage pipeline complete for ticket {ticket_id}: {result}")
-    except Exception as e:
-        logger.exception(f"Triage pipeline failed for ticket {ticket_id}: {e}")
+        ticket_id = int(ticket_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="ticket_id must be an integer")
+
+    logger.info(f"Review webhook received for ticket {ticket_id}")
+
+    background_tasks.add_task(
+        _run_pipeline_background,
+        ticket_id=ticket_id,
+        mode="review",
+        app=request.app,
+    )
+
+    return {"status": "accepted", "ticket_id": ticket_id}
+
+
+# Limit concurrent pipeline executions to avoid Halo API rate limits
+# (700 requests per rolling 5-minute window)
+_pipeline_semaphore = asyncio.Semaphore(2)
+
+
+async def _run_pipeline_background(
+    ticket_id: int, app: FastAPI, mode: str = "triage",
+):
+    """Background task wrapper for the ticket pipeline."""
+    from triage import run_ticket_pipeline
+
+    async with _pipeline_semaphore:
+        try:
+            result = await run_ticket_pipeline(
+                ticket_id=ticket_id,
+                halo_client=app.state.halo_client,
+                ninja_client=app.state.ninja_client,
+                anthropic_api_key=settings.anthropic_api_key,
+                model=settings.triage_model,
+                mode=mode,
+                review_model=settings.review_model if mode == "review" else None,
+                sop_kb_search_term=settings.sop_kb_search_term,
+                sop_kb_filter_tag=settings.sop_kb_filter_tag,
+                max_sop_articles=settings.max_sop_articles,
+                max_sop_article_length=settings.max_sop_article_length,
+                max_contract_doc_length=settings.max_contract_doc_length,
+                mesh_client=app.state.mesh_client,
+                cipp_client=app.state.cipp_client,
+            )
+            logger.info(f"Ticket pipeline ({mode}) complete for ticket {ticket_id}: {result}")
+        except Exception as e:
+            logger.exception(f"Ticket pipeline ({mode}) failed for ticket {ticket_id}: {e}")
 
 
 if __name__ == "__main__":

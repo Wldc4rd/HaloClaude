@@ -5,6 +5,7 @@ Provides methods to interact with Halo's REST API for fetching
 tickets, users, clients, assets, and knowledge base articles.
 """
 
+import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -72,19 +73,40 @@ class HaloClient:
         """
         token = await self._auth.get_token()
         client = await self.get_http_client()
-        
+
         url = f"{self.api_url}/{endpoint.lstrip('/')}"
-        
-        response = await client.request(
-            method=method,
-            url=url,
-            params=params,
-            json=json,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-            },
-        )
+
+        max_retries = 5
+        retry_waits = [15, 30, 45, 60, 60]  # seconds — long enough for rolling 5-min window
+        auth_retried = False
+        for attempt in range(max_retries + 1):
+            response = await client.request(
+                method=method,
+                url=url,
+                params=params,
+                json=json,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+            )
+            if response.status_code == 401 and not auth_retried:
+                # Token expired mid-pipeline — force refresh and retry once
+                logger.warning(f"Halo API 401 ({method} {endpoint}), refreshing token")
+                self._auth._token = None
+                token = await self._auth.get_token()
+                auth_retried = True
+                continue
+            if response.status_code == 429 and attempt < max_retries:
+                wait = retry_waits[attempt]
+                logger.warning(
+                    f"Halo API rate limited ({method} {endpoint}), "
+                    f"retrying in {wait}s (attempt {attempt + 1}/{max_retries})"
+                )
+                await asyncio.sleep(wait)
+                continue
+            break
+
         if response.status_code >= 400:
             body = response.text
             logger.error(
@@ -352,7 +374,7 @@ class HaloClient:
         result = await self._request(
             "POST",
             "tickets",
-            json=[{"id": ticket_id, "status_id": 9}],
+            json=[{"id": ticket_id, "status_id": 9, "_appointment01_ok": True}],
         )
         if note:
             await self.create_ticket_note(

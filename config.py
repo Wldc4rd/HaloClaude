@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     triage_enabled: bool = True
     triage_model: str = "claude-opus-4-6"
 
+    # Ticket review pipeline
+    review_enabled: bool = True
+    review_model: str = "claude-haiku-4-5-20251001"
+
     # NinjaRMM / NinjaOne
     ninja_enabled: bool = False
     ninja_api_url: str = "https://app.ninjarmm.com"

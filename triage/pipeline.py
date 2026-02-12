@@ -1,13 +1,22 @@
 """
-Ticket Triage Pipeline
+Ticket Pipeline
 
-Sequential multi-stage pipeline that triages a new ticket:
-0. User/Client Resolution - identifies and links user/client for unlinked tickets
-1. Triage Agent - classifies client/contract situation
-2a. Sales Path - creates opportunity if no contract/prepaid time
-2b. Contract Enrichment - generates contract notes if missing
-2c. Asset Auto-Assignment - links user's workstation to ticket
-3. Technical Triage - assigns technician and writes analysis note
+Unified multi-stage pipeline for ticket processing with two modes:
+
+  mode="triage" (new tickets):
+    0.  User/Client Resolution
+    0.5 Junk Filter — auto-close spam/OOO/bounce
+    1.  Triage Classification
+    2b. Contract Enrichment
+    2c. Asset Auto-Assignment
+    2a. Sales Path (if no contract)
+    3.  Technical Triage
+
+  mode="review" (existing tickets, triggered by Halo runbook):
+    0.  User/Client Resolution
+    0.5 Junk Filter
+    2c. Asset Auto-Assignment
+    R.  Conversation Review — AI reads conversation, sets status or closes
 """
 
 import json
@@ -24,6 +33,7 @@ from .prompts import (
     TRIAGE_SYSTEM_PROMPT,
     TECHNICAL_TRIAGE_SYSTEM_PROMPT,
     CONTRACT_SUMMARY_PROMPT,
+    REVIEW_SYSTEM_PROMPT,
 )
 
 logger = logging.getLogger(__name__)
@@ -48,12 +58,14 @@ class TriageResult:
     reasoning: str = ""
 
 
-async def run_triage_pipeline(
+async def run_ticket_pipeline(
     ticket_id: int,
     halo_client: HaloClient,
     ninja_client: Optional[Any],
     anthropic_api_key: str,
     model: str,
+    mode: str = "triage",
+    review_model: Optional[str] = None,
     sop_kb_search_term: Optional[str] = "SOP",
     sop_kb_filter_tag: Optional[str] = "ai-context",
     max_sop_articles: int = 10,
@@ -63,17 +75,23 @@ async def run_triage_pipeline(
     cipp_client: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """
-    Run the full triage pipeline for a ticket.
+    Run the ticket pipeline in the specified mode.
+
+    Modes:
+        "triage" — full triage for new tickets (default)
+        "review" — AI conversation review for existing tickets
 
     Returns a summary dict of what happened (for logging).
     """
     result: Dict[str, Any] = {
         "ticket_id": ticket_id,
+        "mode": mode,
         "stages_completed": [],
         "errors": [],
     }
 
     client = anthropic.AsyncAnthropic(api_key=anthropic_api_key)
+    is_review = mode == "review"
 
     # --- Fetch context (reuse existing ContextFetcher) ---
     fetcher = ContextFetcher(
@@ -89,7 +107,7 @@ async def run_triage_pipeline(
         max_contract_doc_length=max_contract_doc_length,
     )
 
-    logger.info(f"Triage pipeline starting for ticket {ticket_id}")
+    logger.info(f"Ticket pipeline starting for ticket {ticket_id} (mode={mode})")
 
     context = await fetcher.fetch_full_context(ticket_id)
     if not context.ticket:
@@ -141,68 +159,85 @@ async def run_triage_pipeline(
             # Non-fatal, continue pipeline
 
     # ========================================
-    # Check for Leif IT clients — bypass triage/contract/sales checks
+    # STAGE 0.5: Junk Filter (both modes)
     # ========================================
-    is_leif_it = False
-    if context.client:
-        is_leif_it = context.client.get("top_level_id") == JUSTIN_TOP_LEVEL_ID
+    try:
+        junk_closed = await _stage05_junk_filter(
+            halo_client, client, model, ticket_id, context,
+        )
+        if junk_closed:
+            result["stages_completed"].append("junk_filter")
+            result["route"] = "auto_closed"
+            result["junk_reason"] = junk_closed
+            logger.info(f"Ticket {ticket_id} auto-closed as junk: {junk_closed}")
+            return result
+    except Exception as e:
+        logger.warning(f"Junk filter failed for ticket {ticket_id}: {e}")
+        result["errors"].append(f"Junk filter failed: {e}")
+        # Non-fatal, continue pipeline
 
     triage = None
-
-    if is_leif_it:
-        logger.info(
-            f"Leif IT client detected for ticket {ticket_id}, "
-            f"routing directly to Justin (agent {JUSTIN_AGENT_ID})"
-        )
-        result["stages_completed"].append("leif_it_routing")
-        result["route"] = "technical"
-    else:
-        # ========================================
-        # STAGE 1: Triage Classification
-        # ========================================
-        try:
-            triage = await _stage1_triage(client, model, context, formatted_context)
-            result["stages_completed"].append("triage")
-            result["triage"] = {
-                "client_type": triage.client_type,
-                "has_active_contract": triage.has_active_contract,
-                "has_prepaid_time": triage.has_prepaid_time,
-                "prepaid_balance": triage.prepaid_balance,
-                "route": triage.route,
-                "reasoning": triage.reasoning,
-            }
-        except Exception as e:
-            logger.exception(f"Stage 1 triage failed for ticket {ticket_id}: {e}")
-            result["errors"].append(f"Triage failed: {e}")
-            # Write failure note to ticket so the team knows
-            try:
-                await halo_client.create_ticket_note(
-                    ticket_id=ticket_id,
-                    note=f"<b>Triage Pipeline Error</b><br>Stage 1 classification failed: {e}",
-                    hiddenfromuser=True,
-                )
-            except Exception:
-                pass
-            return result
-
-        # ========================================
-        # STAGE 2b: Contract Enrichment (if needed)
-        # ========================================
-        # Check all active contracts — Stage 2b will evaluate note quality
-        contracts_to_check = _find_active_contracts(context.contracts)
-        if contracts_to_check:
-            try:
-                await _stage2b_enrich_contracts(
-                    client, model, halo_client, context, contracts_to_check
-                )
-                result["stages_completed"].append("contract_enrichment")
-            except Exception as e:
-                logger.warning(f"Contract enrichment failed: {e}")
-                result["errors"].append(f"Contract enrichment failed: {e}")
-                # Non-fatal, continue pipeline
+    is_leif_it = False
 
     # ========================================
-    # STAGE 2c: Asset Auto-Assignment (runs for all clients)
+    # TRIAGE-ONLY: Classification, Contract Enrichment
+    # ========================================
+    if not is_review:
+        # Check for Leif IT clients — bypass triage/contract/sales checks
+        if context.client:
+            is_leif_it = context.client.get("top_level_id") == JUSTIN_TOP_LEVEL_ID
+
+        if is_leif_it:
+            logger.info(
+                f"Leif IT client detected for ticket {ticket_id}, "
+                f"routing directly to Justin (agent {JUSTIN_AGENT_ID})"
+            )
+            result["stages_completed"].append("leif_it_routing")
+            result["route"] = "technical"
+        else:
+            # ========================================
+            # STAGE 1: Triage Classification
+            # ========================================
+            try:
+                triage = await _stage1_triage(client, model, context, formatted_context)
+                result["stages_completed"].append("triage")
+                result["triage"] = {
+                    "client_type": triage.client_type,
+                    "has_active_contract": triage.has_active_contract,
+                    "has_prepaid_time": triage.has_prepaid_time,
+                    "prepaid_balance": triage.prepaid_balance,
+                    "route": triage.route,
+                    "reasoning": triage.reasoning,
+                }
+            except Exception as e:
+                logger.exception(f"Stage 1 triage failed for ticket {ticket_id}: {e}")
+                result["errors"].append(f"Triage failed: {e}")
+                try:
+                    await halo_client.create_ticket_note(
+                        ticket_id=ticket_id,
+                        note=f"<b>Triage Pipeline Error</b><br>Stage 1 classification failed: {e}",
+                        hiddenfromuser=True,
+                    )
+                except Exception:
+                    pass
+                return result
+
+            # ========================================
+            # STAGE 2b: Contract Enrichment (if needed)
+            # ========================================
+            contracts_to_check = _find_active_contracts(context.contracts)
+            if contracts_to_check:
+                try:
+                    await _stage2b_enrich_contracts(
+                        client, model, halo_client, context, contracts_to_check
+                    )
+                    result["stages_completed"].append("contract_enrichment")
+                except Exception as e:
+                    logger.warning(f"Contract enrichment failed: {e}")
+                    result["errors"].append(f"Contract enrichment failed: {e}")
+
+    # ========================================
+    # STAGE 2c: Asset Auto-Assignment (both modes)
     # ========================================
     if not context.assets:
         try:
@@ -219,43 +254,55 @@ async def run_triage_pipeline(
                         or matched_asset.get("key_field", "")
                     ),
                 }
-                # Re-format context so Stage 3 sees the device data
                 formatted_context = formatter.format(context)
         except Exception as e:
             logger.warning(f"Asset auto-assignment failed for ticket {ticket_id}: {e}")
             result["errors"].append(f"Asset auto-assignment failed: {e}")
-            # Non-fatal, continue pipeline
 
-    # ========================================
-    # STAGE 2a: Sales Path (skipped for Leif IT)
-    # ========================================
-    if triage and triage.route == "sales":
-        try:
-            await _stage2a_sales_path(halo_client, ticket_id, context, triage)
-            result["stages_completed"].append("sales_path")
-            result["route"] = "sales"
-        except Exception as e:
-            logger.exception(f"Sales path failed for ticket {ticket_id}: {e}")
-            result["errors"].append(f"Sales path failed: {e}")
-        logger.info(f"Triage pipeline complete for ticket {ticket_id}: {result}")
-        return result
+    if not is_review:
+        # ========================================
+        # STAGE 2a: Sales Path (triage only, skipped for Leif IT)
+        # ========================================
+        if triage and triage.route == "sales":
+            try:
+                await _stage2a_sales_path(halo_client, ticket_id, context, triage)
+                result["stages_completed"].append("sales_path")
+                result["route"] = "sales"
+            except Exception as e:
+                logger.exception(f"Sales path failed for ticket {ticket_id}: {e}")
+                result["errors"].append(f"Sales path failed: {e}")
+            logger.info(f"Ticket pipeline complete for ticket {ticket_id}: {result}")
+            return result
 
-    # ========================================
-    # STAGE 3: Technical Triage
-    # ========================================
-    if is_leif_it or (triage and triage.route == "technical"):
+        # ========================================
+        # STAGE 3: Technical Triage
+        # ========================================
+        if is_leif_it or (triage and triage.route == "technical"):
+            try:
+                await _stage3_technical_triage(
+                    client, model, halo_client, ninja_client, mesh_client,
+                    cipp_client, ticket_id, context, formatted_context, triage,
+                )
+                result["stages_completed"].append("technical_triage")
+                result["route"] = "technical"
+            except Exception as e:
+                logger.exception(f"Technical triage failed for ticket {ticket_id}: {e}")
+                result["errors"].append(f"Technical triage failed: {e}")
+    else:
+        # ========================================
+        # STAGE R: Conversation Review (review mode only)
+        # ========================================
         try:
-            await _stage3_technical_triage(
-                client, model, halo_client, ninja_client, mesh_client,
-                cipp_client, ticket_id, context, formatted_context, triage,
+            await _stageR_conversation_review(
+                client, review_model or model, halo_client,
+                ticket_id, context, formatted_context,
             )
-            result["stages_completed"].append("technical_triage")
-            result["route"] = "technical"
+            result["stages_completed"].append("conversation_review")
         except Exception as e:
-            logger.exception(f"Technical triage failed for ticket {ticket_id}: {e}")
-            result["errors"].append(f"Technical triage failed: {e}")
+            logger.exception(f"Conversation review failed for ticket {ticket_id}: {e}")
+            result["errors"].append(f"Conversation review failed: {e}")
 
-    logger.info(f"Triage pipeline complete for ticket {ticket_id}: {result}")
+    logger.info(f"Ticket pipeline complete for ticket {ticket_id}: {result}")
     return result
 
 
@@ -314,6 +361,91 @@ async def _stage0_resolve_user_or_client(
     context.errors = new_context.errors
 
     return resolution
+
+
+async def _stage05_junk_filter(
+    halo_client: HaloClient,
+    anthropic_client: anthropic.AsyncAnthropic,
+    model: str,
+    ticket_id: int,
+    context: ContextData,
+) -> Optional[str]:
+    """
+    Stage 0.5: Detect and auto-close junk tickets.
+
+    Returns the junk reason string if the ticket was closed, None otherwise.
+    """
+    from .junk_detector import (
+        should_skip_junk_detection,
+        classify_ticket_as_junk,
+        ai_confirm_junk,
+    )
+
+    summary = context.ticket.get("summary", "")
+    details = context.ticket.get("details", "")
+
+    # Extract sender email from first action or user
+    sender_email = ""
+    if context.actions:
+        first_action = context.actions[0]
+        sender_email = first_action.get("emailfrom", "") or ""
+    if not sender_email and context.user:
+        sender_email = context.user.get("emailaddress", "") or ""
+
+    # Extract first action body
+    first_action_body = ""
+    if context.actions:
+        first_action_body = context.actions[0].get("note", "") or ""
+
+    # Get agent_id and action_count for safety checks
+    agent_id = context.ticket.get("agent_id")
+    if isinstance(agent_id, dict):
+        agent_id = agent_id.get("id")
+    action_count = len(context.actions) if context.actions else 0
+    combined_text = f"{summary} {details} {first_action_body}"
+
+    # Safety pre-check
+    if should_skip_junk_detection(sender_email, agent_id, action_count, combined_text):
+        logger.debug(f"Ticket {ticket_id}: skipping junk detection (safety pre-check)")
+        return None
+
+    # Deterministic classification
+    junk = classify_ticket_as_junk(summary, details, sender_email, first_action_body)
+    if not junk:
+        return None
+
+    # High confidence: close immediately
+    # Medium confidence: confirm with AI first
+    if junk.confidence == "medium":
+        content = f"{summary}\n\n{details}\n\n{first_action_body}"
+        confirmed = await ai_confirm_junk(
+            anthropic_client, model, summary, sender_email, content,
+        )
+        if not confirmed:
+            logger.info(
+                f"Ticket {ticket_id}: AI rejected junk classification "
+                f"(pattern={junk.pattern}, reason={junk.reason})"
+            )
+            return None
+
+    # Close the ticket
+    closure_note = (
+        f"<b>Auto-Closed: {junk.pattern.replace('_', ' ').title()}</b><br><br>"
+        f"<b>Reason:</b> {junk.reason}<br>"
+        f"<b>Confidence:</b> {junk.confidence}<br><br>"
+        f"<i>This ticket was automatically closed by the triage pipeline. "
+        f"If this was closed in error, please reopen the ticket.</i>"
+    )
+
+    await halo_client.close_ticket(ticket_id=ticket_id, note=closure_note)
+
+    logger.info(
+        f"Ticket {ticket_id} auto-closed as junk: "
+        f"pattern={junk.pattern}, confidence={junk.confidence}, "
+        f"reason={junk.reason}"
+    )
+
+    return junk.reason
 
 
 async def _stage1_triage(
@@ -923,6 +1055,243 @@ async def _stage3_technical_triage(
     )
 
     logger.info(f"Technical triage complete for ticket {ticket_id}")
+
+
+async def _stageR_conversation_review(
+    client: anthropic.AsyncAnthropic,
+    model: str,
+    halo_client: HaloClient,
+    ticket_id: int,
+    context: ContextData,
+    formatted_context: str,
+) -> None:
+    """
+    Stage R: AI conversation review for existing tickets.
+
+    Reads the full conversation, determines the correct status, and
+    either updates the status or closes the ticket.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    # Step 1: Check review recency — skip if reviewed within 24 hours
+    previous_reviews = []
+    if context.actions:
+        for action in context.actions:
+            note = action.get("note", "") or ""
+            if "[AUTO-REVIEW" in note:
+                # Parse action date
+                action_date_str = action.get("actiondate") or action.get("dateoccurred")
+                if action_date_str:
+                    try:
+                        action_date = datetime.fromisoformat(
+                            action_date_str.replace("Z", "+00:00")
+                        )
+                        if action_date > datetime.now(timezone.utc) - timedelta(hours=24):
+                            logger.info(
+                                f"Ticket {ticket_id}: skipping review — "
+                                f"reviewed within last 24 hours"
+                            )
+                            return
+                    except (ValueError, TypeError):
+                        pass
+                previous_reviews.append(note)
+
+    # Step 2: Build conversation history for AI
+    conversation_lines = []
+    if context.actions:
+        for action in context.actions:
+            who = action.get("who", "Unknown")
+            note = action.get("note", "") or ""
+            outcome = action.get("outcome", "") or ""
+            action_date = action.get("actiondate") or action.get("dateoccurred") or ""
+            action_type = action.get("actiontypename", "") or ""
+
+            if not note and not outcome:
+                continue
+
+            entry = f"[{action_date}] {who}"
+            if action_type:
+                entry += f" ({action_type})"
+            entry += ":"
+            if note:
+                entry += f"\n{note}"
+            if outcome:
+                entry += f"\nOutcome: {outcome}"
+            conversation_lines.append(entry)
+
+    conversation_text = "\n\n---\n\n".join(conversation_lines)
+
+    # Include previous review notes as context
+    review_history = ""
+    if previous_reviews:
+        review_history = (
+            "\n\nPREVIOUS AUTOMATED REVIEWS:\n"
+            + "\n---\n".join(previous_reviews)
+        )
+
+    # Ticket metadata
+    current_status_id = context.ticket.get("status_id")
+    if isinstance(current_status_id, dict):
+        current_status_id = current_status_id.get("id")
+    current_status_name = ""
+    status_obj = context.ticket.get("status")
+    if isinstance(status_obj, dict):
+        current_status_name = status_obj.get("name", "")
+    elif isinstance(context.ticket.get("status_id"), dict):
+        current_status_name = context.ticket["status_id"].get("name", "")
+
+    agent_name = ""
+    agent_id = context.ticket.get("agent_id")
+    if isinstance(agent_id, dict):
+        agent_name = agent_id.get("name", "")
+        agent_id = agent_id.get("id")
+
+    user_content = (
+        f"Review this ticket and determine the correct action.\n\n"
+        f"TICKET SUMMARY: {context.ticket.get('summary', '')}\n"
+        f"CURRENT STATUS: {current_status_name} (ID: {current_status_id})\n"
+        f"ASSIGNED AGENT: {agent_name or 'Unassigned'}\n"
+        f"PRIORITY: {context.ticket.get('priority_name', 'Unknown')}\n\n"
+        f"CONVERSATION HISTORY:\n{conversation_text}"
+        f"{review_history}"
+    )
+
+    system = REVIEW_SYSTEM_PROMPT + "\n\n" + formatted_context
+
+    response = await client.messages.create(
+        model=model,
+        max_tokens=1024,
+        system=system,
+        messages=[{"role": "user", "content": user_content}],
+    )
+
+    text = response.content[0].text.strip()
+    # Handle markdown code fences
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+
+    data = json.loads(text)
+
+    assessment = data.get("assessment", "active")
+    confidence = data.get("confidence", "low")
+    reasoning = data.get("reasoning", "")
+
+    logger.info(
+        f"Ticket {ticket_id} review result: "
+        f"assessment={assessment}, confidence={confidence}, "
+        f"reasoning={reasoning}"
+    )
+
+    # Step 3: Take action based on assessment
+    if assessment == "junk" and confidence == "high":
+        note = (
+            f"<b>[AUTO-REVIEW: CLOSED - JUNK]</b><br><br>"
+            f"<b>Assessment:</b> This ticket appears to be junk/spam.<br>"
+            f"<b>Reasoning:</b> {reasoning}<br><br>"
+            f"<i>If this was closed in error, please reopen the ticket.</i>"
+        )
+        await halo_client.close_ticket(ticket_id=ticket_id, note=note)
+
+    elif assessment == "resolved" and confidence == "high":
+        note = (
+            f"<b>[AUTO-REVIEW: CLOSED - RESOLVED]</b><br><br>"
+            f"<b>Assessment:</b> This ticket appears to be resolved.<br>"
+            f"<b>Reasoning:</b> {reasoning}<br><br>"
+            f"<i>If this was closed in error, please reopen the ticket.</i>"
+        )
+        await halo_client.close_ticket(ticket_id=ticket_id, note=note)
+
+        # Notify assigned technician
+        if agent_id:
+            logger.info(
+                f"Ticket {ticket_id}: notifying agent {agent_name} "
+                f"(id={agent_id}) of auto-closure"
+            )
+
+    elif assessment == "resolved" and confidence == "medium":
+        note = (
+            f"<b>[AUTO-REVIEW: APPEARS RESOLVED]</b><br><br>"
+            f"<b>Assessment:</b> This ticket appears to be resolved but "
+            f"confidence is not high enough for auto-closure.<br>"
+            f"<b>Reasoning:</b> {reasoning}<br><br>"
+            f"<i>Please review and close if appropriate.</i>"
+        )
+        await halo_client.create_ticket_note(
+            ticket_id=ticket_id, note=note, hiddenfromuser=True,
+        )
+
+    elif assessment == "waiting_customer":
+        if current_status_id != 22:
+            await halo_client.update_ticket(ticket_id=ticket_id, status_id=22)
+            note = (
+                f"<b>[AUTO-REVIEW: STATUS → WAITING FOR CUSTOMER]</b><br><br>"
+                f"<b>Reasoning:</b> {reasoning}"
+            )
+            await halo_client.create_ticket_note(
+                ticket_id=ticket_id, note=note, hiddenfromuser=True,
+            )
+        else:
+            logger.debug(
+                f"Ticket {ticket_id}: already in Waiting for Customer status"
+            )
+
+    elif assessment == "waiting_us":
+        if current_status_id != 23:
+            await halo_client.update_ticket(ticket_id=ticket_id, status_id=23)
+            note = (
+                f"<b>[AUTO-REVIEW: NEEDS ATTENTION]</b><br><br>"
+                f"<b>Assessment:</b> Customer is waiting for our response.<br>"
+                f"<b>Reasoning:</b> {reasoning}"
+            )
+            await halo_client.create_ticket_note(
+                ticket_id=ticket_id, note=note, hiddenfromuser=True,
+            )
+        else:
+            logger.debug(
+                f"Ticket {ticket_id}: already in User Update status"
+            )
+
+    else:
+        # "active" or low confidence — no action
+        logger.info(
+            f"Ticket {ticket_id}: review assessment is '{assessment}' "
+            f"(confidence={confidence}), no action taken"
+        )
+
+    # Step 4: Auto-assign unassigned tickets that weren't closed
+    ticket_was_closed = (
+        (assessment == "junk" and confidence == "high")
+        or (assessment == "resolved" and confidence == "high")
+    )
+    REAL_AGENT_IDS = {CHARLIE_AGENT_ID, JUSTIN_AGENT_ID}
+    if not ticket_was_closed and agent_id not in REAL_AGENT_IDS:
+        # Determine correct agent using same logic as triage
+        top_level_id = None
+        if context.client:
+            top_level_id = context.client.get("top_level_id")
+
+        if top_level_id == JUSTIN_TOP_LEVEL_ID:
+            assign_agent_id = JUSTIN_AGENT_ID
+            assign_agent_name = "Justin"
+        else:
+            assign_agent_id = CHARLIE_AGENT_ID
+            assign_agent_name = "Charlie"
+
+        await halo_client.update_ticket(
+            ticket_id=ticket_id, agent_id=assign_agent_id,
+        )
+        note = (
+            f"<b>[AUTO-REVIEW: ASSIGNED → {assign_agent_name}]</b><br><br>"
+            f"<b>Reasoning:</b> Ticket was unassigned during review. "
+            f"Auto-assigned based on client routing."
+        )
+        await halo_client.create_ticket_note(
+            ticket_id=ticket_id, note=note, hiddenfromuser=True,
+        )
+        logger.info(
+            f"Ticket {ticket_id}: auto-assigned to {assign_agent_name} "
+            f"(agent_id={assign_agent_id})"
+        )
 
 
 # =============================================================================

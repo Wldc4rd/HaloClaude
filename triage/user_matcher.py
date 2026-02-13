@@ -143,8 +143,70 @@ def _collect_ticket_text(ticket: Dict, actions: List[Dict]) -> str:
     return "\n".join(parts)
 
 
+def _collect_ticket_summary_text(ticket: Dict) -> str:
+    """Gather just the summary and details for hostname extraction.
+
+    Action notes contain full email HTML with Exchange headers, MIME
+    boundaries, TLS cipher strings, etc.  These produce massive false
+    positives for hostname regex and all-caps token matching, so we
+    restrict hostname extraction to the ticket's own fields and strip
+    email header noise from the details.
+    """
+    parts = []
+    if ticket.get("summary"):
+        parts.append(ticket["summary"])
+    if ticket.get("details"):
+        parts.append(_strip_email_noise(ticket["details"]))
+    return "\n".join(parts)
+
+
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 _ALLCAPS_TOKEN_RE = re.compile(r"\b[A-Z][A-Z0-9]{2,29}\b")
+
+# Patterns used to strip email header noise from ticket details.
+# Lines starting with RFC 822 header names (word chars + dashes, then colon).
+# Value may follow on the same line (`: value`) or on a continuation line.
+_EMAIL_HEADER_RE = re.compile(
+    r"^[A-Za-z][A-Za-z0-9-]*:\s?",
+    re.MULTILINE,
+)
+# Base64-encoded chunks (long runs of alphanumeric + /+=)
+_BASE64_CHUNK_RE = re.compile(r"[A-Za-z0-9+/=]{40,}")
+# MIME boundary markers
+_MIME_BOUNDARY_RE = re.compile(r"--[\w.+=-]{10,}")
+
+
+def _strip_email_noise(text: str) -> str:
+    """Remove email headers, base64 chunks, and MIME boundaries from text.
+
+    Halo stores the full email (including Exchange headers, TLS cipher
+    strings, MIME boundaries, and base64-encoded content) in the ticket
+    details field.  These produce false positives for hostname matching.
+
+    Also strips RFC 822 continuation lines (starting with whitespace)
+    that follow a header line.
+    """
+    lines = text.split("\n")
+    clean = []
+    in_header = False
+    for line in lines:
+        stripped = line.strip()
+        # Skip email header lines (X-MS-Exchange-*, Content-Type:, etc.)
+        if _EMAIL_HEADER_RE.match(stripped):
+            in_header = True
+            continue
+        # Continuation lines (start with space/tab) after a header
+        if in_header and stripped and line[0] in (" ", "\t"):
+            continue
+        in_header = False
+        # Skip base64-encoded lines
+        if _BASE64_CHUNK_RE.fullmatch(stripped):
+            continue
+        # Skip MIME boundaries
+        if _MIME_BOUNDARY_RE.fullmatch(stripped):
+            continue
+        clean.append(line)
+    return "\n".join(clean)
 
 # Tokens that frequently appear in all-caps in ticket HTML/text but are
 # never hostnames.  Kept small — NinjaRMM exact-match is the real filter.
@@ -305,6 +367,10 @@ async def find_and_link_user_or_client(
         logger.info(f"Ticket {ticket_id} has no searchable text")
         return None
 
+    # Narrow text for hostname extraction — summary + details only,
+    # excludes action notes which contain email headers / MIME noise.
+    summary_text = _collect_ticket_summary_text(ticket)
+
     # === Strategy 1: Email address matching ===
     emails = _extract_emails(text)
     if emails:
@@ -339,7 +405,7 @@ async def find_and_link_user_or_client(
                 return result
 
     # === Strategy 2: Regex hostname matching ===
-    hostnames = _extract_hostnames(text)
+    hostnames = _extract_hostnames(summary_text)
     if hostnames:
         logger.info(
             f"Extracted {len(hostnames)} candidate hostname(s) from ticket "
@@ -354,7 +420,7 @@ async def find_and_link_user_or_client(
     # === Strategy 3: Broad all-caps tokens → NinjaRMM (only if available) ===
     if ninja_client:
         already_tried = set(hostnames) if hostnames else set()
-        caps_tokens = _extract_allcaps_tokens(text, exclude=already_tried)
+        caps_tokens = _extract_allcaps_tokens(summary_text, exclude=already_tried)
         if caps_tokens:
             logger.info(
                 f"Trying {len(caps_tokens)} broad caps token(s) against NinjaRMM "
@@ -371,7 +437,9 @@ async def find_and_link_user_or_client(
 
     # === Strategy 4: AI hostname extraction (final fallback) ===
     if anthropic_client:
-        ai_hostname = await _ai_extract_hostname(text, anthropic_client, model)
+        ai_hostname = await _ai_extract_hostname(
+            summary_text, anthropic_client, model
+        )
         if ai_hostname:
             already_tried = set(hostnames) if hostnames else set()
             if ai_hostname not in already_tried:

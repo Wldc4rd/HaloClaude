@@ -599,7 +599,7 @@ async def _stage2c_auto_assign_asset(
     """
     from .asset_matcher import find_and_link_workstation
     from .user_matcher import (
-        _collect_ticket_text,
+        _collect_ticket_summary_text,
         _extract_hostnames,
         _extract_allcaps_tokens,
         _try_hostname_match,
@@ -635,7 +635,7 @@ async def _stage2c_auto_assign_asset(
 
     # === Strategies 2-4: Hostname from ticket text ===
     if not matched_asset:
-        text = _collect_ticket_text(context.ticket, context.actions)
+        text = _collect_ticket_summary_text(context.ticket)
 
         # Strategy 2: Regex hostname extraction
         hostnames = _extract_hostnames(text) if text else []

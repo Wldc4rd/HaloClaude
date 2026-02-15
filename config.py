@@ -61,6 +61,14 @@ class Settings(BaseSettings):
     mesh_api_url: str = "https://hub-us.emailsecurity.app"
     mesh_api_key: Optional[str] = None
 
+    # 1Stream (BVOIP call recording)
+    onestream_enabled: bool = False
+    onestream_api_url: str = "https://portal.1stream.com"
+    onestream_api_key: Optional[str] = None
+
+    # OpenAI (Whisper transcription)
+    openai_api_key: Optional[str] = None
+
     # CIPP (CyberDrain Improved Partner Portal)
     cipp_enabled: bool = False
     cipp_api_url: Optional[str] = None

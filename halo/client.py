@@ -180,6 +180,9 @@ class HaloClient:
         note: str,
         hiddenfromuser: bool = True,
         action_id: Optional[int] = None,
+        timetaken: Optional[float] = None,
+        datetime_override: Optional[str] = None,
+        chargerate: Optional[int] = None,
     ) -> Any:
         """
         Create or update a note/action on a ticket.
@@ -189,6 +192,9 @@ class HaloClient:
             note: Note content (supports HTML)
             hiddenfromuser: If True, note is private/agent-only
             action_id: If provided, updates an existing action instead of creating
+            timetaken: Time spent in hours (e.g. 0.25 = 15 minutes)
+            datetime_override: ISO 8601 datetime to set as "Date Done" on the note
+            chargerate: Charge rate ID (0=No Charge, 1=Remote Support)
 
         Returns:
             Created/updated action details
@@ -204,6 +210,12 @@ class HaloClient:
             logger.info(f"Updating note {action_id} on ticket {ticket_id}")
         else:
             logger.info(f"Creating note on ticket {ticket_id} (private={hiddenfromuser})")
+        if timetaken is not None:
+            action["timetaken"] = timetaken
+        if datetime_override is not None:
+            action["datetime"] = datetime_override
+        if chargerate is not None:
+            action["chargerate"] = chargerate
         return await self._request("POST", "actions", json=[action])
 
     async def create_ticket(
@@ -514,6 +526,32 @@ class HaloClient:
             f"(record_count={result.get('record_count', '?')})"
         )
         return tickets
+
+    # =========================================================================
+    # Agent Operations
+    # =========================================================================
+
+    async def get_agent_name(self, agent_id: int) -> Optional[str]:
+        """
+        Look up an agent's display name by ID.
+
+        Args:
+            agent_id: The agent ID
+
+        Returns:
+            Agent name or None if not found
+        """
+        try:
+            result = await self._request("GET", "Agent", params={
+                "ids": str(agent_id),
+                "basic_fields_only": True,
+            })
+            agents = result.get("agents", result.get("records", []))
+            if agents:
+                return agents[0].get("name")
+        except Exception:
+            logger.debug(f"Could not fetch agent name for ID {agent_id}", exc_info=True)
+        return None
 
     # =========================================================================
     # User Operations
@@ -846,9 +884,33 @@ class HaloClient:
         logger.info(f"Fetched {len(attachments)} attachments for contract {contract_id}")
         return attachments
 
+    async def get_ticket_attachments(
+        self, ticket_id: int,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get attachments on a ticket.
+
+        Args:
+            ticket_id: The ticket ID
+
+        Returns:
+            List of attachment metadata dicts (id, filename, filesize, etc.)
+        """
+        logger.debug(f"Fetching attachments for ticket {ticket_id}")
+        result = await self._request("GET", "Attachment", params={
+            "ticket_id": ticket_id,
+        })
+        attachments = result.get("attachments", [])
+        logger.info(f"Fetched {len(attachments)} attachments for ticket {ticket_id}")
+        return attachments
+
     async def get_attachment_bytes(self, attachment_id: int) -> bytes:
         """
         Download an attachment as raw bytes.
+
+        First fetches the attachment metadata (which may contain a download
+        link for externally-stored files like 1Stream call recordings), then
+        downloads the actual binary content.
 
         Args:
             attachment_id: The attachment ID
@@ -857,7 +919,32 @@ class HaloClient:
             Raw file bytes
         """
         logger.debug(f"Downloading attachment {attachment_id}")
-        return await self._request_bytes("GET", f"Attachment/{attachment_id}")
+
+        # GET /Attachment/{id} returns binary for locally-stored files, or
+        # JSON with a "link" field for externally-stored files (e.g. 1Stream).
+        data = await self._request_bytes("GET", f"Attachment/{attachment_id}")
+
+        # If the response is small and looks like JSON, the file is stored
+        # externally — parse the metadata and follow the download link.
+        if len(data) < 2048 and data[:1] == b"{":
+            import json
+            try:
+                meta = json.loads(data)
+                link = meta.get("link") or meta.get("url")
+                if link:
+                    logger.debug(f"Attachment stored externally, following link")
+                    client = await self.get_http_client()
+                    resp = await client.get(link)
+                    resp.raise_for_status()
+                    return resp.content
+                logger.warning(
+                    f"Attachment {attachment_id} returned JSON without a download link: "
+                    f"{list(meta.keys())}"
+                )
+            except json.JSONDecodeError:
+                pass  # Not actually JSON, return raw bytes
+
+        return data
 
     # =========================================================================
     # Asset Operations

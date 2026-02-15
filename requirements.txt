@@ -16,6 +16,12 @@ cryptography>=42.0.0
 # PDF text extraction
 pymupdf>=1.24.0
 
+# OpenAI (Whisper transcription)
+openai>=1.30.0
+
+# Audio metadata
+mutagen>=1.47.0
+
 # Utilities
 python-dotenv>=1.0.0
 

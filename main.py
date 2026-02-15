@@ -79,6 +79,17 @@ async def lifespan(app: FastAPI):
         set_cipp_client(app.state.cipp_client)
         logger.info("CIPP integration enabled")
 
+    # Initialize 1Stream client if enabled
+    app.state.onestream_client = None
+    if settings.onestream_enabled:
+        from onestream import OneStreamClient, set_onestream_client
+        app.state.onestream_client = OneStreamClient(
+            base_url=settings.onestream_api_url,
+            api_key=settings.onestream_api_key,
+        )
+        set_onestream_client(app.state.onestream_client)
+        logger.info("1Stream integration enabled")
+
     app.state.translator = AzureOpenAITranslator()
     app.state.message_fixer = MessageFixer()
     app.state.agent_executor = AgentExecutor(
@@ -105,6 +116,8 @@ async def lifespan(app: FastAPI):
         yield
 
     # Cleanup
+    if app.state.onestream_client:
+        await app.state.onestream_client.close()
     if app.state.cipp_client:
         await app.state.cipp_client.close()
     if app.state.mesh_client:
@@ -144,6 +157,14 @@ async def rewrite_mcp_trailing_slash(request: Request, call_next):
     """Rewrite /mcp to /mcp/ to avoid Starlette's 307 redirect."""
     if request.url.path == "/mcp":
         request.scope["path"] = "/mcp/"
+
+    # Log any POST requests to unexpected paths (helps debug webhook delivery)
+    path = request.url.path
+    if request.method == "POST" and not path.startswith(("/mcp", "/openai", "/webhook/", "/token")):
+        logger.warning(
+            f"Unexpected POST to {path} from {request.client.host if request.client else 'unknown'}"
+        )
+
     return await call_next(request)
 
 
@@ -433,6 +454,45 @@ async def webhook_review(
     return {"status": "accepted", "ticket_id": ticket_id}
 
 
+@app.post("/webhook/onestream", status_code=202)
+@app.post("/webhook/onestream/", status_code=202, include_in_schema=False)
+async def webhook_onestream(
+    request: Request,
+    background_tasks: BackgroundTasks,
+):
+    """
+    1Stream CallEnd / TranscriptionReady webhook.
+
+    Handles two event types:
+    - CallEnd: In-flight CallID (NOT the database ID). Match by extension +
+      phone number + timestamp instead.
+    - TranscriptionReady: Permanent database CallID. Look up directly via
+      GetCallLogs.
+
+    No API key auth — 1Stream webhooks don't support custom headers.
+    """
+    if not settings.onestream_enabled:
+        raise HTTPException(status_code=503, detail="1Stream integration is disabled")
+
+    raw_body = await request.body()
+    logger.info(f"1Stream webhook raw payload: {raw_body[:500]}")
+
+    body = await request.json()
+    event_type = body.get("EventType", "unknown")
+    logger.info(
+        f"1Stream webhook: EventType={event_type}, "
+        f"CallID={body.get('CallID')}, Ext={body.get('ExtensionNumber')}"
+    )
+
+    background_tasks.add_task(
+        _run_onestream_transcription,
+        webhook_body=body,
+        app=request.app,
+    )
+
+    return {"status": "accepted", "event_type": event_type}
+
+
 # Limit concurrent pipeline executions to avoid Halo API rate limits
 # (700 requests per rolling 5-minute window)
 _pipeline_semaphore = asyncio.Semaphore(2)
@@ -465,6 +525,438 @@ async def _run_pipeline_background(
             logger.info(f"Ticket pipeline ({mode}) complete for ticket {ticket_id}: {result}")
         except Exception as e:
             logger.exception(f"Ticket pipeline ({mode}) failed for ticket {ticket_id}: {e}")
+
+
+async def _run_onestream_transcription(
+    webhook_body: dict,
+    app: FastAPI,
+):
+    """Background task: look up a 1Stream call and run the transcription pipeline.
+
+    Handles two webhook event types:
+    - TranscriptionReady: CallID is the permanent database ID → direct lookup
+    - CallEnd: CallID is an in-flight ID → match by extension + phone + timestamp
+    """
+    from mcp_server.transcribe import transcribe_call_recording
+    from mcp_server.prompts import SPEAKER_CONTEXT_TEMPLATE
+
+    onestream_client = app.state.onestream_client
+    halo_client = app.state.halo_client
+
+    event_type = webhook_body.get("EventType", "unknown")
+    call_id = str(webhook_body.get("CallID", ""))
+    timestamp = webhook_body.get("DateTimeStamp")
+
+    async with _pipeline_semaphore:
+        try:
+            # CallEnd fires immediately — the call log / recording may not
+            # be available yet. Wait a bit before searching.
+            if event_type == "CallEnd":
+                logger.info("1Stream: CallEnd received, waiting 30s for call log to appear")
+                await asyncio.sleep(30)
+
+            # 1. Find the call log entry (strategy depends on event type)
+            if event_type == "TranscriptionReady":
+                # Permanent database CallID — direct lookup
+                call_log = await _find_onestream_call_by_id(
+                    onestream_client, call_id, timestamp,
+                )
+            else:
+                # CallEnd — in-flight ID, match by extension + phone + time
+                call_log = await _find_onestream_call_by_metadata(
+                    onestream_client, webhook_body,
+                )
+
+            if not call_log:
+                logger.warning(
+                    f"1Stream: No matching call found for {event_type} webhook "
+                    f"(CallID={call_id}), skipping"
+                )
+                return
+
+            db_call_id = call_log.get("CallID", call_id)
+            logger.info(
+                f"1Stream: Found call {db_call_id}: "
+                f"{'Inbound' if call_log.get('Inbound') else 'Outbound'}, "
+                f"{call_log.get('TalkTimeSeconds', 0)}s, "
+                f"CRMTicketID={call_log.get('CRMTicketID')}"
+            )
+
+            # 2. Resolve the Halo ticket
+            ticket_id = None
+            crm_ticket_id = call_log.get("CRMTicketID")
+            if crm_ticket_id and int(crm_ticket_id) > 0:
+                ticket_id = int(crm_ticket_id)
+                logger.info(f"1Stream: Using CRMTicketID={ticket_id}")
+            else:
+                ticket_id = await _resolve_ticket_by_phone(
+                    halo_client, call_log,
+                )
+                if ticket_id:
+                    logger.info(
+                        f"1Stream: Resolved ticket {ticket_id} via phone lookup"
+                    )
+
+            if not ticket_id:
+                logger.warning(
+                    f"1Stream: No Halo ticket found for call {db_call_id}, skipping"
+                )
+                return
+
+            # 3. Build speaker context from Halo ticket (most reliable source)
+            is_inbound = call_log.get("Inbound", True)
+            customer_name = None
+            agent_name = None
+
+            try:
+                ticket = await halo_client.get_ticket(ticket_id)
+                customer_name = ticket.get("user_name")
+                agent_name = ticket.get("agent_name")
+                logger.info(
+                    f"1Stream: Ticket {ticket_id} — "
+                    f"user={customer_name}, agent={agent_name}"
+                )
+            except Exception:
+                logger.warning(
+                    f"1Stream: Could not fetch ticket {ticket_id} for speaker context"
+                )
+
+            # Fall back to 1Stream metadata if ticket lookup failed
+            if not customer_name:
+                if is_inbound:
+                    customer_name = call_log.get("OriginatedByName") or "Unknown Caller"
+                else:
+                    customer_name = call_log.get("DestinationName") or "Unknown Contact"
+            if not agent_name:
+                agent_name = call_log.get("ExtensionName") or "Unknown Agent"
+
+            participants = (
+                f"- **Customer/End-User**: {customer_name}\n"
+                f"- **Agent (IT Technician)**: {agent_name}\n"
+            )
+            speaker_context = SPEAKER_CONTEXT_TEMPLATE.format(
+                participants=participants,
+            )
+
+            # 4. Download the recording
+            download_url = call_log.get("DownloadRecording")
+            if not download_url:
+                logger.warning(
+                    f"1Stream: No DownloadRecording URL for call {db_call_id}"
+                )
+                return
+
+            audio_bytes = await onestream_client.download_recording(download_url)
+
+            # 5. Build call metadata for the note
+            # 1Stream uses OriginatedBy/Destination instead of CallerID/Dialled
+            if is_inbound:
+                external_number = call_log.get("OriginatedBy")
+                external_name = call_log.get("OriginatedByName")
+            else:
+                external_number = call_log.get("Destination")
+                external_name = call_log.get("DestinationName")
+
+            # Use the webhook's DateTimeStamp (call end time in UTC) as the note
+            # datetime, since the call log's ActualEndTime can be unreliable.
+            # Fall back to parsing the .NET date from the call log if no webhook ts.
+            webhook_ts = webhook_body.get("DateTimeStamp")
+            if webhook_ts:
+                webhook_dt = _parse_onestream_timestamp(webhook_ts)
+                note_datetime = webhook_dt.isoformat()
+            else:
+                call_end_iso = _parse_dotnet_date(call_log.get("ActualEndTime"))
+                call_start_iso = _parse_dotnet_date(call_log.get("ActualStartTime"))
+                note_datetime = call_end_iso or call_start_iso
+            logger.info(f"1Stream: Note datetime = {note_datetime}")
+
+            call_metadata = {
+                "direction": "Inbound" if is_inbound else "Outbound",
+                "caller_number": external_number,
+                "caller_name": external_name or call_log.get("OriginatedByName"),
+                "dialled_number": call_log.get("Destination") if not is_inbound else None,
+                "extension": call_log.get("ExtensionName"),
+                "datetime": note_datetime,
+            }
+
+            # 6. Run transcription pipeline
+            duration_seconds = call_log.get("TalkTimeSeconds")
+
+            result = await transcribe_call_recording(
+                halo_client=halo_client,
+                ticket_id=ticket_id,
+                post_note=True,
+                audio_bytes=audio_bytes,
+                speaker_context_override=speaker_context,
+                duration_override=float(duration_seconds) if duration_seconds else None,
+                note_datetime=note_datetime,
+                call_metadata=call_metadata,
+            )
+
+            logger.info(
+                f"1Stream: Transcription complete for call {db_call_id} "
+                f"→ ticket {ticket_id} ({len(result)} chars)"
+            )
+
+        except Exception as e:
+            logger.exception(
+                f"1Stream: Transcription failed for {event_type} "
+                f"CallID={call_id}: {e}"
+            )
+
+
+def _parse_onestream_timestamp(timestamp: str | None):
+    """Parse 1Stream webhook timestamps (e.g. '2/15/2026 8:36:26\u202fPM')."""
+    from datetime import datetime
+
+    if not timestamp:
+        return datetime.utcnow()
+
+    try:
+        clean = timestamp.replace("\u202f", " ").replace("\xa0", " ").strip()
+        for fmt in (
+            "%m/%d/%Y %I:%M:%S %p",
+            "%m/%d/%Y %H:%M:%S",
+            "%m/%d/%Y %I:%M %p",
+            "%m/%d/%Y %H:%M",
+        ):
+            try:
+                return datetime.strptime(clean, fmt)
+            except ValueError:
+                continue
+        return datetime.fromisoformat(clean.replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        logger.warning(f"1Stream: Could not parse timestamp '{timestamp}', using now")
+        return datetime.utcnow()
+
+
+def _parse_dotnet_date(value: str | None) -> str | None:
+    """Parse a .NET JSON date like '/Date(1769954587000-0500)/' to ISO 8601.
+
+    Returns an ISO 8601 string (e.g. '2026-02-15T12:36:27-05:00') or None.
+    """
+    if not value:
+        return None
+
+    import re
+    from datetime import datetime, timezone, timedelta
+
+    m = re.search(r"/Date\((\d+)([+-]\d{4})?\)/", value)
+    if not m:
+        return None
+
+    epoch_ms = int(m.group(1))
+    dt = datetime.fromtimestamp(epoch_ms / 1000, tz=timezone.utc)
+
+    # Apply the timezone offset if present
+    if m.group(2):
+        offset_str = m.group(2)
+        offset_hours = int(offset_str[:3])
+        offset_mins = int(offset_str[0] + offset_str[3:5])
+        tz = timezone(timedelta(hours=offset_hours, minutes=offset_mins))
+        dt = dt.astimezone(tz)
+
+    return dt.isoformat()
+
+
+def _extract_phone_from_webhook(webhook_body: dict) -> str | None:
+    """Extract the external phone number from a CallEnd webhook payload.
+
+    For inbound: FromPhone is the external number (clean digits)
+    For outbound: ToPhone is the external number (clean digits)
+    The trunk side looks like 'Wexternalline.52: 10000 on Wprovider...'
+    """
+    import re
+
+    from_phone = webhook_body.get("FromPhone", "")
+    to_phone = webhook_body.get("ToPhone", "")
+
+    # The trunk side contains 'Wexternalline' or 'Wprovider'
+    # The real phone number is the other side
+    for phone in (from_phone, to_phone):
+        if not phone:
+            continue
+        # Skip trunk-detail strings
+        if "Wexternalline" in phone or "Wprovider" in phone:
+            continue
+        # Extract digits (strip +, spaces, dashes)
+        digits = re.sub(r"[^\d]", "", phone)
+        if len(digits) >= 7:
+            return digits
+
+    return None
+
+
+async def _find_onestream_call_by_id(
+    client,
+    call_id: str,
+    timestamp: str | None,
+) -> dict | None:
+    """Find a call log entry by permanent database CallID (TranscriptionReady)."""
+    from datetime import timedelta
+
+    dt = _parse_onestream_timestamp(timestamp)
+    call_id_str = str(call_id).strip()
+
+    for window_minutes in (5, 15, 60):
+        start = (dt - timedelta(minutes=window_minutes)).strftime("%-m/%-d/%Y %H:%M")
+        end = (dt + timedelta(minutes=window_minutes)).strftime("%-m/%-d/%Y %H:%M")
+
+        call_logs = await client.get_call_logs(
+            start_date=start, end_date=end, page_size=100,
+        )
+
+        found_ids = [str(c.get("CallID", "?")) for c in call_logs]
+        logger.info(f"1Stream: Looking for CallID={call_id_str} in {found_ids}")
+
+        for call in call_logs:
+            if str(call.get("CallID", "")).strip() == call_id_str:
+                return call
+
+        if window_minutes < 60:
+            logger.info(
+                f"1Stream: CallID {call_id_str} not found in ±{window_minutes}min, "
+                f"widening search"
+            )
+
+    return None
+
+
+async def _find_onestream_call_by_metadata(
+    client,
+    webhook_body: dict,
+) -> dict | None:
+    """Find a call log entry by extension + phone + timestamp (CallEnd).
+
+    The CallEnd webhook's CallID is an in-flight ID that doesn't match
+    GetCallLogs. Instead we match by extension number, phone number, and
+    closest timestamp.
+    """
+    from datetime import timedelta
+
+    dt = _parse_onestream_timestamp(webhook_body.get("DateTimeStamp"))
+    ext = webhook_body.get("ExtensionNumber", "").strip()
+    phone = _extract_phone_from_webhook(webhook_body)
+
+    logger.info(f"1Stream: CallEnd lookup — ext={ext}, phone={phone}, time={dt}")
+
+    if not phone:
+        logger.warning("1Stream: Could not extract phone number from CallEnd webhook")
+        return None
+
+    # Search a window around the call end time
+    # CallEnd fires at call end; the call log's StartDate could be much earlier
+    for window_minutes in (15, 30, 60):
+        start = (dt - timedelta(minutes=window_minutes)).strftime("%-m/%-d/%Y %H:%M")
+        end = (dt + timedelta(minutes=5)).strftime("%-m/%-d/%Y %H:%M")
+
+        call_logs = await client.get_call_logs(
+            start_date=start, end_date=end, page_size=100,
+        )
+
+        # Log call details for debugging
+        for i, call in enumerate(call_logs):
+            logger.info(
+                f"1Stream: Call[{i}] CallID={call.get('CallID')} "
+                f"Ext={call.get('ExtensionNumber')!r} "
+                f"Inbound={call.get('Inbound')} "
+                f"OriginatedBy={call.get('OriginatedBy')!r} "
+                f"Destination={call.get('Destination')!r} "
+                f"DestName={call.get('DestinationName')!r}"
+            )
+
+        logger.info(
+            f"1Stream: CallEnd search ±{window_minutes}min found "
+            f"{len(call_logs)} calls, looking for phone={phone}"
+        )
+
+        # Match by phone number using the correct 1Stream fields:
+        # - Inbound:  OriginatedBy = external phone, Destination = internal
+        # - Outbound: OriginatedBy = internal ext,   Destination = external phone
+        import re
+        candidates = []
+        for call in call_logs:
+            originated = re.sub(r"[^\d]", "", str(call.get("OriginatedBy") or ""))
+            destination = re.sub(r"[^\d]", "", str(call.get("Destination") or ""))
+            call_ext = str(call.get("ExtensionNumber", "")).strip()
+
+            # Check if the external phone matches either field
+            phone_match = False
+            if phone:
+                for field_digits in (originated, destination):
+                    if not field_digits or len(field_digits) < 7:
+                        continue  # Skip short values (extensions, not phone numbers)
+                    if phone in field_digits or field_digits in phone:
+                        phone_match = True
+                        break
+
+            if phone_match:
+                ext_match = (call_ext == ext) if ext else True
+                candidates.append((call, ext_match))
+
+        if candidates:
+            ext_matches = [c for c, m in candidates if m]
+            if ext_matches:
+                logger.info(
+                    f"1Stream: Matched {len(ext_matches)} call(s) by "
+                    f"phone={phone} + ext={ext}"
+                )
+                return ext_matches[-1]
+            logger.info(
+                f"1Stream: Matched {len(candidates)} call(s) by "
+                f"phone={phone} (ext mismatch)"
+            )
+            return candidates[-1][0]
+
+        if window_minutes < 60:
+            logger.info(
+                f"1Stream: No phone match in ±{window_minutes}min, widening"
+            )
+
+    return None
+
+
+async def _resolve_ticket_by_phone(
+    halo_client: HaloClient,
+    call_log: dict,
+) -> int | None:
+    """Resolve a Halo ticket by searching for the caller's phone number."""
+    is_inbound = call_log.get("Inbound", True)
+
+    # For inbound calls, search by caller's number (OriginatedBy)
+    # For outbound calls, search by the dialled number (Destination)
+    phone = (
+        call_log.get("OriginatedBy") if is_inbound
+        else call_log.get("Destination")
+    )
+
+    if not phone:
+        return None
+
+    # Strip common prefixes for search
+    search_phone = phone.lstrip("+").lstrip("1") if len(phone) > 10 else phone
+
+    try:
+        results = await halo_client.search_tickets(
+            query=search_phone,
+            count=5,
+        )
+
+        if not results:
+            return None
+
+        # Return the first (most relevant) match
+        for ticket in results:
+            tid = ticket.get("id")
+            if tid:
+                return int(tid)
+
+    except Exception:
+        logger.debug(
+            f"1Stream: Phone search failed for {search_phone}", exc_info=True,
+        )
+
+    return None
 
 
 if __name__ == "__main__":

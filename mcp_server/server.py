@@ -595,3 +595,64 @@ async def get_kb_article(article_id: int) -> Dict[str, Any]:
     logger.info(f"MCP: get_kb_article called with article_id={article_id}")
     client = get_halo_client()
     return await client.get_kb_article(article_id)
+
+
+# =============================================================================
+# Attachment / Call Recording Tools
+# =============================================================================
+
+@mcp.tool(
+    description="List attachments on a Halo ticket. Use this to find call "
+    "recording MP3s before transcribing them."
+)
+async def list_ticket_attachments(ticket_id: int) -> List[Dict[str, Any]]:
+    """
+    List all attachments on a Halo ticket.
+
+    Args:
+        ticket_id: The ticket ID to list attachments for
+    """
+    logger.info(f"MCP: list_ticket_attachments called with ticket_id={ticket_id}")
+    client = get_halo_client()
+    return await client.get_ticket_attachments(ticket_id)
+
+
+@mcp.tool(
+    description="Transcribe and summarize a call recording. Accepts either a "
+    "direct URL to an audio file or a Halo attachment_id. Downloads the audio, "
+    "transcribes it with Whisper, then sends the transcript to Claude for "
+    "structured analysis (summary, sentiment, next steps, coaching, transcript). "
+    "If ticket_id is provided, posts the result as a private note on the ticket. "
+    "For Halo attachments, use list_ticket_attachments first to find the attachment_id."
+)
+async def transcribe_call(
+    url: Optional[str] = None,
+    ticket_id: Optional[int] = None,
+    attachment_id: Optional[int] = None,
+    post_note: bool = True,
+) -> str:
+    """
+    Transcribe and analyze a call recording.
+
+    Args:
+        url: Direct URL to an audio file (MP3, WAV, etc.). Use this for
+             recordings not stored in Halo.
+        ticket_id: Halo ticket ID. Required if posting a note or using attachment_id.
+        attachment_id: Halo attachment ID. Use list_ticket_attachments to find this.
+        post_note: If true and ticket_id is set, post transcription as a private note
+                   (default true)
+    """
+    logger.info(
+        f"MCP: transcribe_call called with ticket_id={ticket_id}, "
+        f"attachment_id={attachment_id}, url={'<provided>' if url else None}"
+    )
+    from .transcribe import transcribe_call_recording
+
+    client = get_halo_client()
+    return await transcribe_call_recording(
+        halo_client=client,
+        ticket_id=ticket_id,
+        attachment_id=attachment_id,
+        url=url,
+        post_note=post_note,
+    )

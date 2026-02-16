@@ -211,8 +211,7 @@ The triage pipeline (`POST /webhook/triage`) runs a multi-stage AI analysis on n
 
 1. **Triage**: Classifies client type (managed/break-fix/none), checks contract status and prepaid balance
 2. **Contract Enrichment**: If contract notes are empty, generates a summary
-3. **Sales Path**: If no contract or prepaid time, creates an Opportunity in Halo
-4. **Technical Path**: Assigns to correct technician (Charlie or Justin based on client), runs full analysis with tools, writes private note
+3. **Technical Path**: Assigns to correct technician (Charlie or Justin based on client), runs full analysis with tools, writes private note
 
 **Trigger**: POST to `/webhook/triage` with `{"ticket_id": 12345}` and `api-key` header. Returns 202 immediately, runs in background.
 

@@ -54,7 +54,7 @@ class TriageResult:
     prepaid_balance: float
     contract_ids: List[int] = field(default_factory=list)
     work_covered_by_managed: bool = False
-    route: str = ""  # "sales" or "technical"
+    route: str = ""  # "technical"
     reasoning: str = ""
 
 
@@ -260,20 +260,6 @@ async def run_ticket_pipeline(
             result["errors"].append(f"Asset auto-assignment failed: {e}")
 
     if not is_review:
-        # ========================================
-        # STAGE 2a: Sales Path (triage only, skipped for Leif IT)
-        # ========================================
-        if triage and triage.route == "sales":
-            try:
-                await _stage2a_sales_path(halo_client, ticket_id, context, triage)
-                result["stages_completed"].append("sales_path")
-                result["route"] = "sales"
-            except Exception as e:
-                logger.exception(f"Sales path failed for ticket {ticket_id}: {e}")
-                result["errors"].append(f"Sales path failed: {e}")
-            logger.info(f"Ticket pipeline complete for ticket {ticket_id}: {result}")
-            return result
-
         # ========================================
         # STAGE 3: Technical Triage
         # ========================================
@@ -494,15 +480,7 @@ async def _stage1_triage(
         reasoning=data.get("reasoning", ""),
     )
 
-    # Determine route based on decision logic (Python, not Claude)
-    # Sales path: only for clients with NO active contract at all.
-    # Clients with an active contract always go to technical — even if
-    # prepaid time is exhausted, purchasing more credits is handled in
-    # the support ticket, not via a separate sales opportunity.
-    if not triage.has_active_contract:
-        triage.route = "sales"
-    else:
-        triage.route = "technical"
+    triage.route = "technical"
 
     logger.info(
         f"Triage result: type={triage.client_type}, "
@@ -513,67 +491,6 @@ async def _stage1_triage(
     )
 
     return triage
-
-
-async def _stage2a_sales_path(
-    halo_client: HaloClient,
-    ticket_id: int,
-    context: ContextData,
-    triage: TriageResult,
-) -> None:
-    """Stage 2a: Create opportunity and add private note to ticket."""
-    client_id = context.ticket.get("client_id")
-    if isinstance(client_id, dict):
-        client_id = client_id.get("id")
-
-    client_name = ""
-    if context.client:
-        client_name = context.client.get("name", "")
-
-    ticket_summary = context.ticket.get("summary", "")
-
-    # Create opportunity in Halo
-    opp = await halo_client.create_opportunity(
-        summary=f"Sales follow-up: {ticket_summary}",
-        client_id=client_id,
-        details=(
-            f"Auto-generated from ticket #{ticket_id}.\n\n"
-            f"Reason: {triage.reasoning}\n\n"
-            f"Client: {client_name}\n"
-            f"Client type: {triage.client_type}\n"
-            f"Active contract: {triage.has_active_contract}\n"
-            f"Prepaid balance: {triage.prepaid_balance}h"
-        ),
-    )
-
-    # Halo POST returns a list; get ID from first element
-    opp_id = "unknown"
-    if isinstance(opp, list) and opp:
-        opp_id = opp[0].get("id", "unknown")
-    elif isinstance(opp, dict):
-        opp_id = opp.get("id", "unknown")
-
-    # Add private note to ticket
-    note_text = (
-        f"<b>Triage Pipeline - Sales Path</b><br><br>"
-        f"This ticket requires sales attention before technical work can begin.<br><br>"
-        f"<b>Reason:</b> {triage.reasoning}<br>"
-        f"<b>Client type:</b> {triage.client_type}<br>"
-        f"<b>Active contract:</b> {'Yes' if triage.has_active_contract else 'No'}<br>"
-        f"<b>Prepaid balance:</b> {triage.prepaid_balance}h<br><br>"
-        f"<b>Opportunity created:</b> #{opp_id}"
-    )
-
-    await halo_client.create_ticket_note(
-        ticket_id=ticket_id,
-        note=note_text,
-        hiddenfromuser=True,
-    )
-
-    logger.info(
-        f"Sales path complete for ticket {ticket_id}: "
-        f"opportunity #{opp_id} created"
-    )
 
 
 async def _stage2c_auto_assign_asset(

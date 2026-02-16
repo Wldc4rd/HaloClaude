@@ -755,45 +755,6 @@ class HaloClient:
         return contracts
 
     # =========================================================================
-    # Opportunity Operations
-    # =========================================================================
-
-    async def create_opportunity(
-        self,
-        summary: str,
-        client_id: int,
-        details: Optional[str] = None,
-        agent_id: Optional[int] = None,
-    ) -> Any:
-        """
-        Create a new opportunity in Halo.
-
-        Args:
-            summary: Opportunity summary/subject
-            client_id: Client/company ID
-            details: Opportunity description
-            agent_id: Assigned agent ID
-
-        Returns:
-            Created opportunity details
-        """
-        from datetime import datetime, timedelta, timezone
-
-        now = datetime.now(timezone.utc)
-        logger.info(f"Creating opportunity: {summary}")
-        opp: Dict[str, Any] = {
-            "summary": summary,
-            "client_id": client_id,
-            "dateoccurred": now.isoformat(),
-            "targetdate": (now + timedelta(days=30)).isoformat(),
-        }
-        if details is not None:
-            opp["details"] = details
-        if agent_id is not None:
-            opp["agent_id"] = agent_id
-        return await self._request("POST", "Opportunities", json=[opp])
-
-    # =========================================================================
     # Recurring Invoice Operations
     # =========================================================================
 

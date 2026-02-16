@@ -147,8 +147,19 @@ async def onestream_get_call_recording(
             if caller_name:
                 participants.append(f"- **Agent (Technician)**: {caller_name}")
         if participants:
+            if direction.lower() == "inbound":
+                dir_text = (
+                    f"This was an **inbound** call — the customer ({caller_name or 'unknown'}) "
+                    f"called in to the IT support line."
+                )
+            else:
+                dir_text = (
+                    f"This was an **outbound** call — the technician ({extension or 'unknown'}) "
+                    f"called the customer ({caller_name or 'unknown'})."
+                )
             speaker_context = SPEAKER_CONTEXT_TEMPLATE.format(
                 participants="\n".join(participants) + "\n",
+                direction=dir_text,
             )
 
     return await transcribe_call_recording(

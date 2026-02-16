@@ -150,6 +150,9 @@ class OneStreamClient:
                     if isinstance(items, list):
                         logger.info(f"1Stream: found {len(items)} items under '{key}'")
                         return items
+                    if items is None:
+                        logger.info(f"1Stream: '{key}' is null (no results)")
+                        return []
             # If it's a single call record dict, wrap it
             if "CallID" in result:
                 logger.info("1Stream: single call record returned")

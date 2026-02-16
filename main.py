@@ -551,21 +551,27 @@ async def _run_onestream_transcription(
         try:
             # CallEnd fires immediately — the call log / recording may not
             # be available yet. Wait a bit before searching.
-            if event_type == "CallEnd":
-                logger.info("1Stream: CallEnd received, waiting 30s for call log to appear")
-                await asyncio.sleep(30)
-
             # 1. Find the call log entry (strategy depends on event type)
+            call_log = None
             if event_type == "TranscriptionReady":
                 # Permanent database CallID — direct lookup
                 call_log = await _find_onestream_call_by_id(
                     onestream_client, call_id, timestamp,
                 )
             else:
-                # CallEnd — in-flight ID, match by extension + phone + time
-                call_log = await _find_onestream_call_by_metadata(
-                    onestream_client, webhook_body,
-                )
+                # CallEnd — the call log may not exist yet in 1Stream's DB.
+                # Retry with increasing delays (30s, 60s, 120s) before giving up.
+                for attempt, delay in enumerate((30, 60, 120), 1):
+                    logger.info(
+                        f"1Stream: CallEnd attempt {attempt}/3, "
+                        f"waiting {delay}s for call log to appear"
+                    )
+                    await asyncio.sleep(delay)
+                    call_log = await _find_onestream_call_by_metadata(
+                        onestream_client, webhook_body,
+                    )
+                    if call_log:
+                        break
 
             if not call_log:
                 logger.warning(
@@ -634,8 +640,19 @@ async def _run_onestream_transcription(
                 f"- **Customer/End-User**: {customer_name}\n"
                 f"- **Agent (IT Technician)**: {agent_name}\n"
             )
+            if is_inbound:
+                direction = (
+                    f"This was an **inbound** call — the customer ({customer_name}) "
+                    f"called in to the IT support line."
+                )
+            else:
+                direction = (
+                    f"This was an **outbound** call — the technician ({agent_name}) "
+                    f"called the customer ({customer_name})."
+                )
             speaker_context = SPEAKER_CONTEXT_TEMPLATE.format(
                 participants=participants,
+                direction=direction,
             )
 
             # 4. Download the recording

@@ -61,6 +61,8 @@ routine monitoring questions, account inquiries, service status updates)
 
 SPEAKER_CONTEXT_TEMPLATE = """\
 
+# Call Context
+{direction}
 # Speaker Identification
 The following are the expected participants on this call based on the ticket \
 and phone system records. Note that the actual speakers may differ (e.g. a \

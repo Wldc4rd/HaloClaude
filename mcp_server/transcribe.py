@@ -165,6 +165,7 @@ async def _get_speaker_context(
 
     return SPEAKER_CONTEXT_TEMPLATE.format(
         participants="\n".join(participants) + "\n",
+        direction="Call direction is unknown (transcribed from a ticket attachment).",
     )
 
 

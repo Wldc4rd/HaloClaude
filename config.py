@@ -69,6 +69,10 @@ class Settings(BaseSettings):
     # OpenAI (Whisper transcription)
     openai_api_key: Optional[str] = None
 
+    # UniFi Network (Site Manager API)
+    unifi_enabled: bool = False
+    unifi_api_key: Optional[str] = None
+
     # CIPP (CyberDrain Improved Partner Portal)
     cipp_enabled: bool = False
     cipp_api_url: Optional[str] = None

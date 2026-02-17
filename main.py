@@ -90,6 +90,14 @@ async def lifespan(app: FastAPI):
         set_onestream_client(app.state.onestream_client)
         logger.info("1Stream integration enabled")
 
+    # Initialize UniFi client if enabled
+    app.state.unifi_client = None
+    if settings.unifi_enabled:
+        from unifi import UniFiClient, set_unifi_client
+        app.state.unifi_client = UniFiClient(api_key=settings.unifi_api_key)
+        set_unifi_client(app.state.unifi_client)
+        logger.info("UniFi integration enabled")
+
     app.state.translator = AzureOpenAITranslator()
     app.state.message_fixer = MessageFixer()
     app.state.agent_executor = AgentExecutor(
@@ -116,6 +124,8 @@ async def lifespan(app: FastAPI):
         yield
 
     # Cleanup
+    if app.state.unifi_client:
+        await app.state.unifi_client.close()
     if app.state.onestream_client:
         await app.state.onestream_client.close()
     if app.state.cipp_client:
